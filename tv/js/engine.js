@@ -52,13 +52,32 @@ class GameEngine {
         document.getElementById('room-code-display').textContent = this.roomCode;
         document.getElementById('hud-room-code').textContent = `ROOM: ${this.roomCode}`;
 
-        // Connect WebSocket
+        // Connect WebSocket (with auto-reconnect)
+        this.connectSocket();
+    }
+
+    connectSocket() {
+        if (this.ws) {
+            try { this.ws.close(); } catch (e) {}
+        }
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         this.ws = new WebSocket(`${proto}//${window.location.host}/ws/tv/${this.roomCode}`);
 
         this.ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            this.handleSocketMessage(data);
+            try {
+                const data = JSON.parse(event.data);
+                this.handleSocketMessage(data);
+            } catch (e) {}
+        };
+
+        this.ws.onclose = () => {
+            this.ws = null;
+            // Auto-reconnect so a server restart / WiFi blip never kills the display
+            setTimeout(() => this.connectSocket(), 2000);
+        };
+
+        this.ws.onerror = () => {
+            try { this.ws.close(); } catch (e) {}
         };
     }
 
