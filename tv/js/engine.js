@@ -161,12 +161,16 @@ class GameEngine {
                 window.particlePool.addFloatingText('KALIBRASI OK', this.width / 2, this.height / 2, '#4ade80');
             }
         } else if (data.type === 'CALIB_START') {
+            // Hide the lobby overlay — the calibration dot is drawn on the canvas
+            // and must be visible (the lobby would otherwise cover it).
+            document.getElementById('lobby-screen').style.display = 'none';
             this.calibDot = Object.assign({ index: 0, time: performance.now() }, this.calibPoints[0]);
         } else if (data.type === 'CALIB_DOT') {
             const idx = Math.max(0, Math.min(data.index || 0, this.calibPoints.length - 1));
             this.calibDot = Object.assign({ index: idx, time: performance.now() }, this.calibPoints[idx]);
         } else if (data.type === 'CALIB_DONE') {
             this.calibDot = null;
+            document.getElementById('lobby-screen').style.display = 'flex';
         } else if (data.type === 'START_GAME_REQ') {
             if (this.state === 'LOBBY') {
                 this.startCountdown();
