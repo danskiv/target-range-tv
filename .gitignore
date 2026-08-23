@@ -6,3 +6,11 @@ __pycache__/
 
 # Logs
 *.log
+
+# Android Build Artifacts
+**/obj/
+**/bin/*.dex
+**/bin/*.apk
+**/bin/*.idsig
+**/bin/unsigned.apk
+**/bin/aligned.apk

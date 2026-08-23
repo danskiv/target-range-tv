@@ -2,13 +2,32 @@
 
 Format berdasarkan [Keep a Changelog](https://keepachangelog.com/). Versi mengikuti SemVer (lihat CONVENTIONS).
 
-## [Unreleased / v2.0.0-alpha — in progress]
+## [v2.0.0-alpha] — 2026-08-23
 ### Added
-- Scaffold `/v2`: PixiJS (WebGL2 + fallback Canvas 2D), tema Neon Cyber Arena
-- Target dasar: Node Statis + Drone Patrol
-- Input APK WebSocket (`/ws/ctrl/{room}`)
-- HUD v2, announcer English, partikel
-- Dokumentasi v2: PRD-v2 (APPROVED), ADR-003/004/005, OVERVIEW, ARCHITECTURE, CONTRIBUTING, TESTING, AUDIT_LOG, dll.
+- **TV Frontend v2 (`tv-v2/`)**:
+  - Engine render modern berbasis **PixiJS (WebGL2)** dengan auto-fallback Canvas 2D untuk browser TV lawas.
+  - Tema visual **Neon Cyber Arena** (palet cyan `#22d3ee` / magenta `#e879f9` / deep space `#0a0f1e`, scanlines murni CSS tanpa filter berat di TV).
+  - Sistem target penuh: *Static Node (bullseye rings), Drone Patrol (zigzag/horizontal), Pop-Up Core, Hazard Shield Drone (penalti & reset combo), Energy Cell (blast radius), Mega Bot (wave final)*.
+  - Sistem partikel *additive-blending* dengan *object pooling* untuk performa TV tanpa GC stutter (muzzle flash, spark explosion, hit sparks, floating combat text).
+  - Layout responsif penuh `100vw/100vh` yang adaptif pada resolusi 720p/1080p/4K tanpa distorsi koordinat.
+  - Durasi ronde 120 detik, combo multiplier bertingkat (x1/x2/x3/x5), dan *Local Storage High Score* ranking.
+  - Overlay kalibrasi 5-titik affine (`0.05/0.50/0.95`) dengan penyembunyian HUD otomatis.
+- **Audio Engine Hybrid (`tv-v2/js/audio.js`)**:
+  - Synthesizer prosedural Web Audio API murni (laser sweep, metallic hit ping, explosion noise buffer, reload, tick chimes) tanpa beban aset statis eksternal.
+  - Announcer suara **English berkualitas** via Speech Synthesis API ("Three, Two, One, FIRE!", "BULLSEYE!", "Combo x3/x5!", "Time is running out!", "Time's up!").
+- **Backend Hub FastAPI (`server/main.py`)**:
+  - Endpoint mount `/tv_v2_static` dan routing `/v2` dengan *no-cache headers* ketat dan encoding UTF-8.
+  - Endpoint WebSocket controller `/ws/controller/{room_code}` dan `/ws/ctrl/{room_code}` dengan relay instan ke `room.tv_socket` (menjaga aturan 1 slot TV per room).
+  - Relay event kalibrasi (`CALIB_START`, `CALIB_DOT`, `CALIB_DONE`) via WebSocket channel.
+
+### Changed (android-controller-app v2.0.0)
+- **APK controller v2**: REST polling → **native WebSocket client** (`org.java_websocket.client.WebSocketClient` via `libs/java-websocket.jar`) ke `/ws/controller/{room_code}` (PRD-v2 §6.1/6.3).
+- Aim sync via dedicated **WS send queue** (BlockingQueue) + sender thread, throttle ~30Hz (30–60Hz PRD) — tidak pernah memblokir thread sensor.
+- Aksi one-shot (TRIGGER_FIRE/RELOAD_ACTION/START_GAME_REQ/CALIB_START/CALIB_DOT/CALIB_DONE) tetap lewat **actionExecutor terpisah** (AUDIT_LOG #2).
+- Server events (`haptic`, `HIT_CONFIRMATION`, `GAME_STATE_SYNC`/game over) → `VibrationEffect` haptic di HP.
+- **Fallback REST** otomatis bila WebSocket gagal/tutup (badge status "REST FALLBACK"), reconnect otomatis tiap ~2 detik.
+- `build.sh`: classpath `libs/java-websocket.jar` **+ `libs/slf4j-api-1.7.30.jar`** (java-websocket 1.5.6 butuh slf4j-api saat runtime) untuk javac + ekstraksi jar & dex penuh via D8.
+- AndroidManifest: versionCode 4 / versionName 2.0.0.
 
 ## [v1.3.3] — 2026-08-23
 ### Fixed

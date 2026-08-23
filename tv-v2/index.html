@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta name="theme-color" content="#0a0f1e">
+    <title>Range Shooter — Neon Cyber Arena</title>
+    <link rel="stylesheet" href="/tv_v2_static/css/tv.css?v=2.0.0-alpha">
+</head>
+<body>
+    <div id="game-container">
+        <!-- PixiJS canvas mounts here (WebGL2, auto-fallback Canvas 2D) -->
+        <div id="pixi-stage" aria-hidden="true"></div>
+
+        <!-- Cheap pure-CSS overlays (no CSS filters — expensive on TV) -->
+        <div class="screen-scanlines" aria-hidden="true"></div>
+        <div class="screen-vignette" aria-hidden="true"></div>
+
+        <!-- ============ HUD (hidden during calibration) ============ -->
+        <div class="hud-layer" id="hud-layer">
+            <div class="hud-header">
+                <div class="room-badge" id="hud-room-code">ROOM: ----</div>
+                <div class="score-panel">
+                    <div class="score-box timer-box">
+                        <div class="label">Time</div>
+                        <div class="val" id="hud-timer">120</div>
+                    </div>
+                    <div class="score-box combo-box">
+                        <div class="label">Combo</div>
+                        <div class="val" id="hud-combo">x1</div>
+                    </div>
+                    <div class="score-box score-box-main">
+                        <div class="label">Score</div>
+                        <div class="val" id="hud-score">0</div>
+                    </div>
+                </div>
+            </div>
+            <div class="hud-footer">
+                <div class="version-badge" id="version-badge-hud">v2.0.0-alpha</div>
+                <div class="ammo-badge" id="hud-ammo">AMMO 6/6</div>
+            </div>
+        </div>
+
+        <!-- ============ Big center announcement (countdown / wave / end) ============ -->
+        <div id="center-announcement">3</div>
+
+        <!-- ============ Lobby screen ============ -->
+        <div id="lobby-screen" class="overlay-screen">
+            <div class="lobby-content">
+                <div class="lobby-title">
+                    <div class="game-title">RANGE SHOOTER</div>
+                    <div class="game-subtitle">NEON CYBER ARENA</div>
+                    <div class="conn-row">
+                        <span class="conn-dot" id="conn-status" data-state="connecting"></span>
+                        <span id="conn-text">Connecting…</span>
+                    </div>
+                </div>
+                <div class="lobby-main">
+                    <div class="room-display">ROOM <span id="lobby-room-code">----</span></div>
+                    <div class="player-list">
+                        <div class="list-label">PILOTS</div>
+                        <ul id="lobby-players"><li>Waiting for controller…</li></ul>
+                    </div>
+                    <div class="lobby-hint">Aim with your phone &nbsp;·&nbsp; tap to fire &nbsp;·&nbsp; calibrate from the app</div>
+                    <div id="fatal-msg" class="fatal hidden"></div>
+                </div>
+                <div class="lobby-side">
+                    <div class="hs-box">
+                        <div class="hs-title">HIGH SCORES</div>
+                        <ol id="hs-preview"><li>No scores yet</li></ol>
+                    </div>
+                    <div class="version-badge" id="version-badge-lobby">v2.0.0-alpha</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ Game over screen ============ -->
+        <div id="game-over-screen" class="overlay-screen hidden">
+            <div class="go-panel">
+                <div class="go-title">ROUND COMPLETE</div>
+                <div class="go-score">
+                    <div class="go-score-label">FINAL SCORE</div>
+                    <div class="go-score-val" id="gs-score">0</div>
+                </div>
+                <div class="go-stats">
+                    <div class="go-stat"><span class="go-stat-label">ACCURACY</span><span class="go-stat-val" id="gs-accuracy">0%</span></div>
+                    <div class="go-stat"><span class="go-stat-label">MAX COMBO</span><span class="go-stat-val" id="gs-combo">x1</span></div>
+                    <div class="go-stat"><span class="go-stat-label">RANK</span><span class="go-stat-val" id="gs-rank">—</span></div>
+                </div>
+                <div id="gs-bonus" class="go-bonus hidden">+500 ACCURACY BONUS</div>
+                <div class="hs-table">
+                    <div class="hs-title">HIGH SCORES</div>
+                    <ol id="hs-list"><li>No scores yet</li></ol>
+                </div>
+                <div class="go-hint" id="gs-hint">AIM &amp; FIRE — or SPACE — to play again</div>
+            </div>
+        </div>
+
+        <!-- ============ Calibration helper (visible only during calib) ============ -->
+        <div id="calib-hint" class="hidden">AIM &amp; FIRE AT THE TARGET</div>
+    </div>
+
+    <!-- PixiJS: CDN first, local fallback for offline LAN (TV WebView) -->
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.20.0/dist/pixi.min.js"></script>
+    <script>window.PIXI || document.write('<script src="/tv_v2_static/js/vendor/pixi.min.js?v=2.0.0-alpha"><\\/script>');</script>
+
+    <!-- Cache-bust every asset: WebView TV caches are hostile -->
+    <script src="/tv_v2_static/js/audio.js?v=2.0.0-alpha"></script>
+    <script src="/tv_v2_static/js/particles.js?v=2.0.0-alpha"></script>
+    <script src="/tv_v2_static/js/targets.js?v=2.0.0-alpha"></script>
+    <script src="/tv_v2_static/js/engine.js?v=2.0.0-alpha"></script>
+</body>
+</html>

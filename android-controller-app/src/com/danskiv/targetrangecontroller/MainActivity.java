@@ -30,19 +30,36 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.java_websocket.client.WebSocketClient;
+import org.java_websocket.handshake.ServerHandshake;
 import org.json.JSONObject;
 
 public class MainActivity extends Activity implements SensorEventListener {
     private static final String TAG = "TargetRangePureNative";
     private static final String SERVER_HOST = "10.225.156.153";
     private static final int SERVER_PORT = 8095;
+
+    // WS message types (server main.py /ws/controller/{room_code})
+    private static final String WS_AIM = "AIM_UPDATE";
+    private static final String WS_FIRE = "TRIGGER_FIRE";
+    private static final String WS_RELOAD = "RELOAD_ACTION";
+    private static final String WS_START_GAME = "START_GAME_REQ";
+    private static final String WS_CALIB_START = "CALIB_START";
+    private static final String WS_CALIB_DOT = "CALIB_DOT";
+    private static final String WS_CALIB_DONE = "CALIB_DONE";
+    private static final String WS_CALIB_ZERO = "CALIBRATE_ZERO";
 
     // Sensors
     private SensorManager sensorManager;
@@ -91,9 +108,22 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     // DEDICATED executor for one-shot actions (shoot/reload/start_game/calib_*).
-    // The aim loop must NEVER share this thread or actions get starved forever.
+    // The aim loop must NEVER share this thread or actions get starved forever
+    // (AUDIT_LOG #2 — action starvation from a monopolized executor).
     private final ExecutorService actionExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    // ---- WebSocket (v2) ----
+    // Dedicated send queue + single sender thread: aim updates are queued here so
+    // they never block the sensor thread, and actions always get their own slot
+    // on actionExecutor (never share with the aim stream).
+    private WebSocketClient wsClient;
+    private final AtomicBoolean wsConnected = new AtomicBoolean(false);
+    private final BlockingQueue<JSONObject> wsSendQueue = new LinkedBlockingQueue<>(128);
+    private ExecutorService wsSenderExecutor = Executors.newSingleThreadExecutor();
+    private volatile boolean wsFallbackREST = false;
+    private volatile long lastAimSentAt = 0L;
+    private static final long AIM_THROTTLE_MS = 33L; // ~30Hz (PRD: 30-60Hz)
 
     // Native UI Components
     private LinearLayout pairingView;
@@ -174,7 +204,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         pairingView.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Air Gun Controller (Pure API Edition)");
+        subtitle.setText("Range Shooter v2 — Native WS Controller");
         subtitle.setTextColor(Color.parseColor("#94a3b8"));
         subtitle.setTextSize(12);
         subtitle.setGravity(Gravity.CENTER);
@@ -187,7 +217,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         codeBox.setBackgroundColor(Color.parseColor("#0f172a"));
         codeBox.setPadding(30, 30, 30, 30);
         codeBox.setGravity(Gravity.CENTER);
-        
+
         TextView lblCode = new TextView(this);
         lblCode.setText("KODE ROOM TV AKTIF:");
         lblCode.setTextColor(Color.parseColor("#cbd5e1"));
@@ -224,6 +254,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                 controllerView.setVisibility(View.VISIBLE);
                 inGame = true;
                 calibrateZero();
+                connectWebSocket();   // v2: open WS channel to /ws/controller/{room}
                 startNativeAimLoop();
             }
         });
@@ -356,7 +387,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         btnStartGame.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                sendHttpAction("start_game");
+                sendAction(WS_START_GAME);
             }
         });
         bottomBar.addView(btnStartGame);
@@ -404,6 +435,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         originRoll = currentRoll;
         isCalibrated = true;
         doVibrate(50);
+        // Notify TV: crosshair resets to center on this controller
+        sendWsMessage(WS_CALIB_ZERO, null);
     }
 
     // ==================== 5-POINT AFFINE CALIBRATION ====================
@@ -436,7 +469,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         calibSamples.clear();
         doVibrate(50);
         updateCalibUI();
-        sendHttpAction("calib_start");
+        sendAction(WS_CALIB_START);
         sendCalibDot(0);
     }
 
@@ -488,7 +521,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                         }
                     }
                 });
-                sendHttpAction("calib_done");
+                sendAction(WS_CALIB_DONE);
             } else {
                 // Bad fit (e.g. shots fired at random positions while the dots
                 // were not visible) — reject it, keep the previous transform and
@@ -577,31 +610,271 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     private void sendCalibDot(final int index) {
+        // Calibration dots are one-shot actions — MUST go through actionExecutor
+        // (never the aim send queue) so they are never dropped behind aim spam.
         actionExecutor.execute(new Runnable() {
             @Override
             public void run() {
+                JSONObject payload = new JSONObject();
                 try {
-                    JSONObject payload = new JSONObject();
                     payload.put("room_code", currentRoom);
                     payload.put("player_id", playerId);
                     payload.put("action", "calib_dot");
                     payload.put("index", index);
-                    URL url = new URL("http://" + SERVER_HOST + ":" + SERVER_PORT + "/api/controller/action");
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("POST");
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setConnectTimeout(500);
-                    conn.setReadTimeout(500);
-                    conn.setDoOutput(true);
-                    OutputStream os = conn.getOutputStream();
-                    os.write(payload.toString().getBytes("UTF-8"));
-                    os.close();
-                    conn.getResponseCode();
-                    conn.disconnect();
                 } catch (Exception e) {}
+                sendActionPayload(WS_CALIB_DOT, payload);
             }
         });
     }
+
+    // ==================== WEBSOCKET (v2) ====================
+
+    /**
+     * Opens the v2 WebSocket channel to ws://SERVER_HOST:SERVER_PORT/ws/controller/{room}.
+     * On failure (server unreachable, WS unsupported) we fall back to the v1 REST
+     * endpoints — the controller keeps working either way.
+     */
+    private void connectWebSocket() {
+        try {
+            String wsUrl = "ws://" + SERVER_HOST + ":" + SERVER_PORT + "/ws/controller/" + currentRoom;
+            wsClient = new WebSocketClient(new URI(wsUrl)) {
+                @Override
+                public void onOpen(ServerHandshake handshakedata) {
+                    Log.i(TAG, "WS connected: " + wsUrl);
+                    wsConnected.set(true);
+                    wsFallbackREST = false;
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (txtPlayerBadge != null) txtPlayerBadge.setText("🟢 P1 - WS CONNECTED");
+                        }
+                    });
+                }
+
+                @Override
+                public void onMessage(String message) {
+                    handleServerMessage(message);
+                }
+
+                @Override
+                public void onClose(int code, String reason, boolean remote) {
+                    Log.w(TAG, "WS closed: " + code + " " + reason);
+                    wsConnected.set(false);
+                    // Fall back to REST until we can reconnect; a reconnect loop
+                    // in the aim thread will re-establish the channel.
+                    wsFallbackREST = true;
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (txtPlayerBadge != null) txtPlayerBadge.setText("🔴 P1 - REST FALLBACK");
+                        }
+                    });
+                }
+
+                @Override
+                public void onError(Exception ex) {
+                    Log.e(TAG, "WS error: " + ex.getMessage());
+                    wsConnected.set(false);
+                    wsFallbackREST = true;
+                }
+            };
+            wsClient.setConnectionLostTimeout(10);
+            wsClient.connect();
+
+            // Dedicated WS sender thread: drains the aim queue and sends over the
+            // socket. Actions bypass this queue (they go through actionExecutor).
+            wsSenderExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    while (inGame) {
+                        try {
+                            JSONObject msg = wsSendQueue.poll(500, TimeUnit.MILLISECONDS);
+                            if (msg != null && wsConnected.get()) {
+                                wsClient.send(msg.toString());
+                            }
+                        } catch (Exception e) {}
+                    }
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "WS connect failed, falling back to REST: " + e.getMessage());
+            wsConnected.set(false);
+            wsFallbackREST = true;
+        }
+    }
+
+    /**
+     * Queues a typed WS message (aim stream path). Called from the sensor/aim
+     * thread — never blocks, never touches the action executor.
+     */
+    private void sendWsMessage(final String type, final JSONObject extra) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("type", type);
+            payload.put("room_code", currentRoom);
+            payload.put("player_id", playerId);
+            if (extra != null) {
+                java.util.Iterator<String> keys = extra.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    payload.put(k, extra.get(k));
+                }
+            }
+            if (wsConnected.get()) {
+                wsSendQueue.offer(payload);
+            } else if (wsFallbackREST) {
+                // REST fallback for control-plane messages that have a REST twin
+                if (WS_AIM.equals(type)) {
+                    sendRestAim(extra);
+                } else if (WS_CALIB_ZERO.equals(type)) {
+                    // no REST twin; harmless to drop
+                }
+            }
+        } catch (Exception e) {}
+    }
+
+    /**
+     * Sends a one-shot action via WebSocket (preferred) or REST (fallback).
+     * ALWAYS runs on actionExecutor — never on the aim thread.
+     */
+    private void sendAction(final String wsType) {
+        sendActionPayload(wsType, null);
+    }
+
+    private void sendActionPayload(final String wsType, final JSONObject extra) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("type", wsType);
+            payload.put("room_code", currentRoom);
+            payload.put("player_id", playerId);
+            if (extra != null) {
+                java.util.Iterator<String> keys = extra.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    payload.put(k, extra.get(k));
+                }
+            }
+            if (wsConnected.get()) {
+                wsClient.send(payload.toString());
+            } else {
+                // REST fallback: map WS action type -> REST action string
+                String restAction = null;
+                if (WS_FIRE.equals(wsType)) restAction = "shoot";
+                else if (WS_RELOAD.equals(wsType)) restAction = "reload";
+                else if (WS_START_GAME.equals(wsType)) restAction = "start_game";
+                else if (WS_CALIB_START.equals(wsType)) restAction = "calib_start";
+                else if (WS_CALIB_DOT.equals(wsType)) restAction = "calib_dot";
+                else if (WS_CALIB_DONE.equals(wsType)) restAction = "calib_done";
+                if (restAction != null) {
+                    sendRestAction(restAction, extra);
+                }
+            }
+        } catch (Exception e) {
+            // Last resort: direct REST
+            try {
+                if (WS_FIRE.equals(wsType)) sendRestAction("shoot", extra);
+                else if (WS_RELOAD.equals(wsType)) sendRestAction("reload", extra);
+                else if (WS_START_GAME.equals(wsType)) sendRestAction("start_game", extra);
+                else if (WS_CALIB_START.equals(wsType)) sendRestAction("calib_start", extra);
+                else if (WS_CALIB_DOT.equals(wsType)) sendRestAction("calib_dot", extra);
+                else if (WS_CALIB_DONE.equals(wsType)) sendRestAction("calib_done", extra);
+            } catch (Exception e2) {}
+        }
+    }
+
+    // ==================== REST FALLBACK (v1 endpoints) ====================
+
+    private void sendRestAim(JSONObject extra) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("room_code", currentRoom);
+            payload.put("player_id", playerId);
+            if (extra != null) {
+                payload.put("x", extra.optDouble("x", 0.5));
+                payload.put("y", extra.optDouble("y", 0.5));
+                payload.put("pitch", extra.optDouble("pitch", 0.0));
+                payload.put("roll", extra.optDouble("roll", 0.0));
+                payload.put("yaw", extra.optDouble("yaw", 0.0));
+            }
+            URL url = new URL("http://" + SERVER_HOST + ":" + SERVER_PORT + "/api/controller/aim");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setConnectTimeout(100);
+            conn.setReadTimeout(100);
+            conn.setDoOutput(true);
+            OutputStream os = conn.getOutputStream();
+            os.write(payload.toString().getBytes("UTF-8"));
+            os.close();
+            conn.getResponseCode();
+            conn.disconnect();
+        } catch (Exception e) {}
+    }
+
+    private void sendRestAction(final String action, final JSONObject extra) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("room_code", currentRoom);
+            payload.put("player_id", playerId);
+            payload.put("action", action);
+            if (extra != null && extra.has("index")) {
+                payload.put("index", extra.optInt("index", 0));
+            }
+            URL url = new URL("http://" + SERVER_HOST + ":" + SERVER_PORT + "/api/controller/action");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setConnectTimeout(500);
+            conn.setReadTimeout(500);
+            conn.setDoOutput(true);
+            OutputStream os = conn.getOutputStream();
+            os.write(payload.toString().getBytes("UTF-8"));
+            os.close();
+            conn.getResponseCode();
+            conn.disconnect();
+        } catch (Exception e) {}
+    }
+
+    // ==================== SERVER EVENTS (haptic / room state) ====================
+
+    private void handleServerMessage(String message) {
+        try {
+            JSONObject json = new JSONObject(message);
+            String type = json.optString("type", "");
+
+            if ("haptic".equals(type) || "HAPTIC".equals(type)) {
+                // v2: {type:"haptic", pattern:[...]} — server feedback (hit, miss)
+                if (json.has("pattern")) {
+                    org.json.JSONArray arr = json.optJSONArray("pattern");
+                    if (arr != null && arr.length() > 0) {
+                        int[] pattern = new int[arr.length()];
+                        for (int i = 0; i < arr.length(); i++) pattern[i] = arr.optInt(i, 50);
+                        doVibrate(pattern);
+                    } else {
+                        doVibrate(json.optInt("duration", 50));
+                    }
+                } else {
+                    doVibrate(json.optInt("duration", 50));
+                }
+            } else if ("HIT_CONFIRMATION".equals(type)) {
+                // Server confirms our shot hit a target — strong haptic pulse
+                doVibrate(new int[]{0, 120, 60, 120});
+            } else if ("GAME_STATE_SYNC".equals(type)) {
+                // Room state changed (countdown, in-game, game over) — pulse
+                String state = json.optString("state", "");
+                if ("GAME_OVER".equalsIgnoreCase(state) || "game_over".equals(state)) {
+                    doVibrate(new int[]{0, 200, 100, 200, 100, 200});
+                } else if ("COUNTDOWN".equalsIgnoreCase(state) || "countdown".equals(state)) {
+                    doVibrate(80);
+                }
+            } else if ("PONG".equals(type)) {
+                // keepalive reply — nothing to do
+            }
+            // CONTROLLER_JOINED_ACK / other types: no vibration, ignore
+        } catch (Exception e) {}
+    }
+
+    // ==================== AIM LOOP (v2: WS-send-queue based) ====================
 
     private void startNativeAimLoop() {
         executor.execute(new Runnable() {
@@ -609,6 +882,12 @@ public class MainActivity extends Activity implements SensorEventListener {
             public void run() {
                 while (inGame) {
                     try {
+                        // Reconnect attempt when the WS dropped and we are in REST
+                        // fallback: try to re-establish the channel every ~2s.
+                        if (wsFallbackREST && wsClient != null && !wsConnected.get()) {
+                            try { wsClient.reconnect(); } catch (Exception e) {}
+                        }
+
                         float normX, normY;
                         if (calibReady) {
                             // Affine transform from 5-point calibration:
@@ -624,29 +903,20 @@ public class MainActivity extends Activity implements SensorEventListener {
                         normX = Math.max(0.0f, Math.min(1.0f, normX));
                         normY = Math.max(0.0f, Math.min(1.0f, normY));
 
-                        JSONObject payload = new JSONObject();
-                        payload.put("room_code", currentRoom);
-                        payload.put("player_id", playerId);
-                        payload.put("x", normX);
-                        payload.put("y", normY);
-                        payload.put("pitch", currentPitch);
-                        payload.put("roll", currentRoll);
-                        payload.put("yaw", currentYaw);
+                        // Throttle to ~30Hz (33ms) — PRD v2 §6.3: 30-60 Hz
+                        long now = System.currentTimeMillis();
+                        if (now - lastAimSentAt >= AIM_THROTTLE_MS) {
+                            lastAimSentAt = now;
+                            JSONObject extra = new JSONObject();
+                            extra.put("x", normX);
+                            extra.put("y", normY);
+                            extra.put("pitch", currentPitch);
+                            extra.put("roll", currentRoll);
+                            extra.put("yaw", currentYaw);
+                            sendWsMessage(WS_AIM, extra);
+                        }
 
-                        URL url = new URL("http://" + SERVER_HOST + ":" + SERVER_PORT + "/api/controller/aim");
-                        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                        conn.setRequestMethod("POST");
-                        conn.setRequestProperty("Content-Type", "application/json");
-                        conn.setConnectTimeout(100);
-                        conn.setReadTimeout(100);
-                        conn.setDoOutput(true);
-                        OutputStream os = conn.getOutputStream();
-                        os.write(payload.toString().getBytes("UTF-8"));
-                        os.close();
-                        conn.getResponseCode();
-                        conn.disconnect();
-
-                        Thread.sleep(30); // ~33 FPS continuous aim sync
+                        Thread.sleep(20);
                     } catch (Exception e) {
                         try { Thread.sleep(50); } catch (Exception ex) {}
                     }
@@ -667,39 +937,23 @@ public class MainActivity extends Activity implements SensorEventListener {
         ammo--;
         updateAmmoUI();
         doVibrate(40);
-        sendHttpAction("shoot");
+        // Actions NEVER run on the aim thread — dedicated actionExecutor (AUDIT_LOG #2)
+        actionExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                sendActionPayload(WS_FIRE, null);
+            }
+        });
     }
 
     private void reloadAmmo() {
         ammo = maxAmmo;
         updateAmmoUI();
         doVibrate(70);
-        sendHttpAction("reload");
-    }
-
-    private void sendHttpAction(final String action) {
         actionExecutor.execute(new Runnable() {
             @Override
             public void run() {
-                try {
-                    JSONObject payload = new JSONObject();
-                    payload.put("room_code", currentRoom);
-                    payload.put("player_id", playerId);
-                    payload.put("action", action);
-
-                    URL url = new URL("http://" + SERVER_HOST + ":" + SERVER_PORT + "/api/controller/action");
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("POST");
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setConnectTimeout(500);
-                    conn.setReadTimeout(500);
-                    conn.setDoOutput(true);
-                    OutputStream os = conn.getOutputStream();
-                    os.write(payload.toString().getBytes("UTF-8"));
-                    os.close();
-                    conn.getResponseCode();
-                    conn.disconnect();
-                } catch (Exception e) {}
+                sendActionPayload(WS_RELOAD, null);
             }
         });
     }
@@ -746,7 +1000,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             float pitch = 0, roll = 0, yaw = 0;
             boolean hasOrientation = false;
 
-            if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR || 
+            if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR ||
                 event.sensor.getType() == Sensor.TYPE_GAME_ROTATION_VECTOR) {
                 SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values);
                 SensorManager.getOrientation(rotationMatrix, orientationValues);
@@ -801,14 +1055,23 @@ public class MainActivity extends Activity implements SensorEventListener {
     protected void onDestroy() {
         super.onDestroy();
         inGame = false;
+        try {
+            if (wsClient != null) wsClient.close();
+        } catch (Exception e) {}
+        wsConnected.set(false);
         executor.shutdown();
         actionExecutor.shutdown();
+        wsSenderExecutor.shutdown();
     }
 
     @Override
     public void onBackPressed() {
         if (inGame) {
             inGame = false;
+            try {
+                if (wsClient != null) wsClient.close();
+            } catch (Exception e) {}
+            wsConnected.set(false);
             controllerView.setVisibility(View.GONE);
             pairingView.setVisibility(View.VISIBLE);
         } else {

@@ -14,6 +14,7 @@ app = FastAPI(title="Target Range TV Hub", version="1.0.0")
 
 # Mount static directories
 app.mount("/tv_static", StaticFiles(directory=str(BASE_DIR / "tv")), name="tv_static")
+app.mount("/tv_v2_static", StaticFiles(directory=str(BASE_DIR / "tv-v2")), name="tv_v2_static")
 app.mount("/ctrl_static", StaticFiles(directory=str(BASE_DIR / "controller")), name="ctrl_static")
 
 @app.middleware("http")
@@ -22,7 +23,12 @@ async def no_cache_middleware(request, call_next):
     'still old version' confusion (badge stayed v1.3.0 while server was newer)."""
     response = await call_next(request)
     path = request.url.path
-    if path.startswith("/tv_static") or path.startswith("/ctrl_static") or path in ("/", "/tv", "/controller"):
+    if (
+        path.startswith("/tv_static")
+        or path.startswith("/tv_v2_static")
+        or path.startswith("/ctrl_static")
+        or path in ("/", "/tv", "/v2", "/controller")
+    ):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -80,6 +86,11 @@ async def index_redirect():
 async def tv_page():
     html_file = BASE_DIR / "tv" / "index.html"
     # Explicit UTF-8: Windows Python defaults to cp1252 which garbles emoji (ðŸŽ¯)
+    return HTMLResponse(content=html_file.read_text(encoding="utf-8"))
+
+@app.get("/v2", response_class=HTMLResponse)
+async def tv_v2_page():
+    html_file = BASE_DIR / "tv-v2" / "index.html"
     return HTMLResponse(content=html_file.read_text(encoding="utf-8"))
 
 @app.get("/controller", response_class=HTMLResponse)
@@ -218,6 +229,7 @@ async def ws_tv_endpoint(websocket: WebSocket, room_code: str):
         room.tv_socket = None
 
 @app.websocket("/ws/controller/{room_code}")
+@app.websocket("/ws/ctrl/{room_code}")
 async def ws_controller_endpoint(websocket: WebSocket, room_code: str):
     await websocket.accept()
     room_code = room_code.upper()
@@ -268,6 +280,11 @@ async def ws_controller_endpoint(websocket: WebSocket, room_code: str):
                 await room.broadcast_to_tv(data)
 
             elif event_type == "START_GAME_REQ":
+                await room.broadcast_to_tv(data)
+
+            elif event_type in ("CALIB_START", "CALIB_DOT", "CALIB_DONE"):
+                # v2 APK sends calibration control over the controller WS channel
+                # (same messages REST /api/controller/action maps to the TV).
                 await room.broadcast_to_tv(data)
 
             elif event_type == "PING":
