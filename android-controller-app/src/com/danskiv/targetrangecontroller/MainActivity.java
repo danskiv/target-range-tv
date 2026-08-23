@@ -2,7 +2,6 @@ package com.danskiv.targetrangecontroller;
 
 import android.app.Activity;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -18,12 +17,12 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.Toast;
+import android.webkit.ConsoleMessage;
 import android.util.Log;
+import java.util.Locale;
 
 public class MainActivity extends Activity implements SensorEventListener {
     private static final String TAG = "TargetRangeController";
-    private static final int PERMISSION_REQ_CODE = 101;
 
     private WebView webView;
     private SensorManager sensorManager;
@@ -39,14 +38,19 @@ public class MainActivity extends Activity implements SensorEventListener {
     private boolean lastAccelerometerSet = false;
     private boolean lastMagnetometerSet = false;
 
-    private long lastSensorUpdate = 0;
+    // Direct native state accessed via JS Interface
+    private volatile float currentPitch = 0.0f;
+    private volatile float currentRoll = 0.0f;
+    private volatile float currentYaw = 0.0f;
+    private volatile boolean sensorActive = false;
+
     private static final String CONTROLLER_URL = "http://10.10.10.1:8095/controller";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Keep screen on & immersive fullscreen
+        // Keep screen alive & immersive
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -55,41 +59,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         );
 
-        // Runtime permissions check (Android 6.0+)
-        checkRuntimePermissions();
-
         initSensors();
         initWebView();
-    }
-
-    private void checkRuntimePermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            String[] permissions = {
-                "android.permission.INTERNET",
-                "android.permission.ACCESS_NETWORK_STATE",
-                "android.permission.VIBRATE"
-            };
-
-            boolean needRequest = false;
-            for (String perm : permissions) {
-                if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
-                    needRequest = true;
-                    break;
-                }
-            }
-
-            if (needRequest) {
-                requestPermissions(permissions, PERMISSION_REQ_CODE);
-            }
-        }
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == PERMISSION_REQ_CODE) {
-            registerSensors();
-        }
     }
 
     private void initSensors() {
@@ -103,6 +74,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             magneticSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
         }
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        registerSensors();
     }
 
     private void initWebView() {
@@ -121,6 +93,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         settings.setAllowContentAccess(true);
 
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        
+        // Expose Native Object directly to Javascript
         webView.addJavascriptInterface(new NativeSensorBridge(), "AndroidNative");
 
         webView.setWebViewClient(new WebViewClient() {
@@ -130,7 +104,14 @@ public class MainActivity extends Activity implements SensorEventListener {
                 webView.evaluateJavascript("if(window.controllerApp){window.controllerApp.onNativeReady();}", null);
             }
         });
-        webView.setWebChromeClient(new WebChromeClient());
+
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage cm) {
+                Log.d(TAG, "[WebView Console] " + cm.message() + " -- From line " + cm.lineNumber());
+                return true;
+            }
+        });
 
         webView.loadUrl(CONTROLLER_URL);
     }
@@ -146,14 +127,17 @@ public class MainActivity extends Activity implements SensorEventListener {
         super.onPause();
         if (sensorManager != null) {
             sensorManager.unregisterListener(this);
+            sensorActive = false;
         }
     }
 
     private void registerSensors() {
         if (sensorManager != null) {
+            boolean registered = false;
             if (rotationSensor != null) {
-                sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME);
-            } else {
+                registered = sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME);
+            }
+            if (!registered) {
                 if (accelSensor != null) {
                     sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_GAME);
                 }
@@ -161,16 +145,12 @@ public class MainActivity extends Activity implements SensorEventListener {
                     sensorManager.registerListener(this, magneticSensor, SensorManager.SENSOR_DELAY_GAME);
                 }
             }
+            sensorActive = true;
         }
     }
 
     @Override
     public void onSensorChanged(SensorEvent event) {
-        long now = System.currentTimeMillis();
-        // Throttle to 50 Hz (20ms)
-        if (now - lastSensorUpdate < 20) return;
-        lastSensorUpdate = now;
-
         float pitch = 0;
         float roll = 0;
         float yaw = 0;
@@ -204,19 +184,9 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
 
         if (hasOrientation) {
-            final float finalPitch = pitch;
-            final float finalRoll = roll;
-            final float finalYaw = yaw;
-
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    webView.evaluateJavascript(
-                        String.format("if(window.onNativeSensorData){window.onNativeSensorData(%f, %f, %f);}", finalPitch, finalRoll, finalYaw),
-                        null
-                    );
-                }
-            });
+            currentPitch = pitch;
+            currentRoll = roll;
+            currentYaw = yaw;
         }
     }
 
@@ -224,6 +194,26 @@ public class MainActivity extends Activity implements SensorEventListener {
     public void onAccuracyChanged(Sensor sensor, int accuracy) {}
 
     public class NativeSensorBridge {
+        @JavascriptInterface
+        public float getPitch() {
+            return currentPitch;
+        }
+
+        @JavascriptInterface
+        public float getRoll() {
+            return currentRoll;
+        }
+
+        @JavascriptInterface
+        public float getYaw() {
+            return currentYaw;
+        }
+
+        @JavascriptInterface
+        public boolean isSensorActive() {
+            return sensorActive;
+        }
+
         @JavascriptInterface
         public void vibrate(int milliseconds) {
             if (vibrator != null) {

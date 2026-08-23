@@ -11,9 +11,8 @@ class ControllerApp {
         this.originRoll = 0.0;
         this.isCalibrated = false;
 
-        // Throttling stream
-        this.lastStreamTime = 0;
-        this.streamIntervalMs = 20; // 50 Hz
+        // Polling timer for high-performance pull
+        this.sensorPollInterval = null;
 
         this.initDOM();
         this.autoDiscoverRoom();
@@ -64,7 +63,7 @@ class ControllerApp {
     }
 
     onNativeReady() {
-        // Automatically hide permission screen in Native APK
+        // Native APK bypasses permission modal completely
         document.getElementById('permission-screen').style.display = 'none';
         this.startController();
     }
@@ -75,9 +74,8 @@ class ControllerApp {
             this.roomCode = manualCode;
         }
 
-        // Hide intro, show controller
         document.getElementById('permission-screen').style.display = 'none';
-        this.startSensorListeners();
+        this.startSensorLoop();
         this.connectWebSocket();
     }
 
@@ -94,6 +92,7 @@ class ControllerApp {
 
         this.ws.onopen = () => {
             document.getElementById('player-name-tag').textContent = `Terhubung (${this.roomCode})`;
+            document.getElementById('player-name-tag').style.color = '#38bdf8';
         };
 
         this.ws.onmessage = (event) => {
@@ -107,34 +106,47 @@ class ControllerApp {
             }
         };
 
-        this.ws.onerror = (e) => {
+        this.ws.onerror = () => {
             document.getElementById('player-name-tag').textContent = `Koneksi Error (${this.roomCode})`;
             document.getElementById('player-name-tag').style.color = '#ef4444';
         };
     }
 
-    startSensorListeners() {
-        // 1. Native Android App Bridge Hook
-        window.onNativeSensorData = (pitch, roll, yaw) => {
-            if (!this.isCalibrated) {
-                this.originPitch = pitch;
-                this.originRoll = roll;
-                this.isCalibrated = true;
+    startSensorLoop() {
+        // High frequency pull loop (60 FPS / ~16ms)
+        if (this.sensorPollInterval) clearInterval(this.sensorPollInterval);
+
+        this.sensorPollInterval = setInterval(() => {
+            let pitch = 0;
+            let roll = 0;
+            let yaw = 0;
+            let hasData = false;
+
+            // 1. Check Native Android Bridge (Direct zero-overhead pull)
+            if (window.AndroidNative && window.AndroidNative.isSensorActive && window.AndroidNative.isSensorActive()) {
+                pitch = window.AndroidNative.getPitch();
+                roll = window.AndroidNative.getRoll();
+                yaw = window.AndroidNative.getYaw();
+                hasData = true;
             }
 
-            const now = performance.now();
-            if (now - this.lastStreamTime >= this.streamIntervalMs) {
-                this.lastStreamTime = now;
-                
+            if (hasData) {
+                if (!this.isCalibrated) {
+                    this.originPitch = pitch;
+                    this.originRoll = roll;
+                    this.isCalibrated = true;
+                }
+
                 const deltaPitch = -(pitch - this.originPitch);
                 const deltaYaw = -(roll - this.originRoll);
 
                 this.sendAim(deltaPitch, deltaYaw, pitch, roll);
             }
-        };
+        }, 16);
 
-        // 2. Standard Web Browser HTML5 Listener Fallback
+        // 2. Browser HTML5 Fallback
         window.addEventListener('deviceorientation', (e) => {
+            if (window.AndroidNative) return; // Ignore if native is active
             if (e.beta === null || e.gamma === null) return;
 
             if (!this.isCalibrated) {
@@ -143,15 +155,10 @@ class ControllerApp {
                 this.isCalibrated = true;
             }
 
-            const now = performance.now();
-            if (now - this.lastStreamTime >= this.streamIntervalMs) {
-                this.lastStreamTime = now;
-                
-                const deltaPitch = e.beta - this.originPitch;
-                const deltaYaw = e.gamma - this.originRoll;
+            const deltaPitch = e.beta - this.originPitch;
+            const deltaYaw = e.gamma - this.originRoll;
 
-                this.sendAim(deltaPitch, deltaYaw, e.beta, e.gamma);
-            }
+            this.sendAim(deltaPitch, deltaYaw, e.beta, e.gamma);
         }, true);
     }
 
