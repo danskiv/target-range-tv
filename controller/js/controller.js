@@ -87,6 +87,27 @@ class ControllerApp {
     }
 
     startSensorListeners() {
+        // 1. Native Android App Bridge Hook
+        window.onNativeSensorData = (pitch, roll, yaw) => {
+            if (!this.isCalibrated) {
+                this.originBeta = pitch;
+                this.originGamma = roll;
+                this.isCalibrated = true;
+            }
+
+            const now = performance.now();
+            if (now - this.lastStreamTime >= this.streamIntervalMs) {
+                this.lastStreamTime = now;
+                
+                // Invert / map correctly
+                const deltaPitch = -(pitch - this.originBeta);
+                const deltaYaw = -(roll - this.originGamma);
+
+                this.sendAim(deltaPitch, deltaYaw, pitch, roll);
+            }
+        };
+
+        // 2. Standard Web Browser HTML5 Listener Fallback
         window.addEventListener('deviceorientation', (e) => {
             if (e.beta === null || e.gamma === null) return;
 
@@ -100,7 +121,6 @@ class ControllerApp {
             if (now - this.lastStreamTime >= this.streamIntervalMs) {
                 this.lastStreamTime = now;
                 
-                // Compute relative pitch and yaw/roll
                 const deltaPitch = e.beta - this.originBeta;
                 const deltaYaw = e.gamma - this.originGamma;
 

@@ -1,24 +1,40 @@
 package com.danskiv.targetrangecontroller;
 
 import android.app.Activity;
+import android.content.Context;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Bundle;
+import android.os.Vibrator;
+import android.os.VibrationEffect;
+import android.os.Build;
 import android.view.View;
 import android.view.WindowManager;
-import android.webkit.PermissionRequest;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements SensorEventListener {
     private WebView webView;
+    private SensorManager sensorManager;
+    private Sensor rotationSensor;
+    private Sensor gyroSensor;
+    private Sensor accelSensor;
+    private Vibrator vibrator;
+    private float[] rotationMatrix = new float[9];
+    private float[] orientationValues = new float[3];
+    private long lastSensorUpdate = 0;
     private static final String CONTROLLER_URL = "http://10.10.10.1:8095/controller";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Keep screen alive during gameplay
+        // Keep screen on & fullscreen
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -26,6 +42,18 @@ public class MainActivity extends Activity {
             | View.SYSTEM_UI_FLAG_FULLSCREEN
             | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         );
+
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (sensorManager != null) {
+            rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+            if (rotationSensor == null) {
+                rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION);
+            }
+            gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+            accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        }
+
+        vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 
         webView = new WebView(this);
         setContentView(webView);
@@ -38,25 +66,97 @@ public class MainActivity extends Activity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
-
-        // Hardware Acceleration
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
+        // Native JS Bridge
+        webView.addJavascriptInterface(new NativeSensorBridge(), "AndroidNative");
+
         webView.setWebViewClient(new WebViewClient());
-        webView.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public void onPermissionRequest(final PermissionRequest request) {
-                // Auto grant sensor & audio permissions
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        request.grant(request.getResources());
-                    }
-                });
-            }
-        });
+        webView.setWebChromeClient(new WebChromeClient());
 
         webView.loadUrl(CONTROLLER_URL);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (sensorManager != null) {
+            if (rotationSensor != null) {
+                sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME);
+            } else if (accelSensor != null) {
+                sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_GAME);
+            }
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (sensorManager != null) {
+            sensorManager.unregisterListener(this);
+        }
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        long now = System.currentTimeMillis();
+        // Throttle to ~50 Hz (20ms)
+        if (now - lastSensorUpdate < 20) return;
+        lastSensorUpdate = now;
+
+        float pitch = 0;
+        float roll = 0;
+        float yaw = 0;
+
+        if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR) {
+            SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values);
+            SensorManager.getOrientation(rotationMatrix, orientationValues);
+            
+            // Radians to degrees
+            yaw = (float) Math.toDegrees(orientationValues[0]);
+            pitch = (float) Math.toDegrees(orientationValues[1]);
+            roll = (float) Math.toDegrees(orientationValues[2]);
+        } else if (event.sensor.getType() == Sensor.TYPE_ORIENTATION) {
+            yaw = event.values[0];
+            pitch = event.values[1];
+            roll = event.values[2];
+        }
+
+        // Push directly to WebView JS
+        final float finalPitch = pitch;
+        final float finalRoll = roll;
+        final float finalYaw = yaw;
+
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                webView.evaluateJavascript(
+                    String.format("if(window.onNativeSensorData){window.onNativeSensorData(%f, %f, %f);}", finalPitch, finalRoll, finalYaw),
+                    null
+                );
+            }
+        });
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+
+    public class NativeSensorBridge {
+        @JavascriptInterface
+        public void vibrate(int milliseconds) {
+            if (vibrator != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(milliseconds, VibrationEffect.DEFAULT_AMPLITUDE));
+                } else {
+                    vibrator.vibrate(milliseconds);
+                }
+            }
+        }
+
+        @JavascriptInterface
+        public boolean isNative() {
+            return true;
+        }
     }
 
     @Override
