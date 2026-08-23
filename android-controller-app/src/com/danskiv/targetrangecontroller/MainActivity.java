@@ -90,6 +90,9 @@ public class MainActivity extends Activity implements SensorEventListener {
     private Button btnCalib;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    // DEDICATED executor for one-shot actions (shoot/reload/start_game/calib_*).
+    // The aim loop must NEVER share this thread or actions get starved forever.
+    private final ExecutorService actionExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // Native UI Components
@@ -538,7 +541,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     private void sendCalibDot(final int index) {
-        executor.execute(new Runnable() {
+        actionExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 try {
@@ -639,7 +642,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     private void sendHttpAction(final String action) {
-        executor.execute(new Runnable() {
+        actionExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 try {
@@ -749,6 +752,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         super.onDestroy();
         inGame = false;
         executor.shutdown();
+        actionExecutor.shutdown();
     }
 
     @Override
