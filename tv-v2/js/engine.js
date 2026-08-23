@@ -390,7 +390,7 @@ class GameEngine {
         const hitY = p.currentY;
 
         // Audio & Visual Muzzle Flash
-        if (this.audio) this.audio.playLaser();
+        if (this.audio) this.audio.playFire();
         this.particles.muzzleFlash(hitX, hitY, -Math.PI / 2, 0x22d3ee);
 
         // Check target collision
@@ -421,7 +421,7 @@ class GameEngine {
                 this.roundScore = Math.max(0, this.roundScore - 100);
                 p.combo = 1;
                 p.streak = 0;
-                if (this.audio) this.audio.playMiss();
+                if (this.audio) this.audio.playPenalty();
                 this.particles.floatingText('-100 HAZARD!', hitX, hitY - 40, 0xef4444);
                 this.particles.sparkExplosion(hitX, hitY, 0xef4444, 16);
             } else if (hitResult.isBullseye) {
@@ -498,7 +498,7 @@ class GameEngine {
         announceElem.textContent = `${count}`;
 
         if (this.audio) {
-            this.audio.playTick(440);
+            this.audio.playCountdownTick();
             this.audio.announce('Three');
         }
 
@@ -507,13 +507,13 @@ class GameEngine {
             if (count > 0) {
                 announceElem.textContent = `${count}`;
                 if (this.audio) {
-                    this.audio.playTick(440 + (3 - count) * 80);
+                    this.audio.playCountdownTick();
                     this.audio.announce(count === 2 ? 'Two' : 'One');
                 }
             } else if (count === 0) {
                 announceElem.textContent = 'FIRE!';
                 if (this.audio) {
-                    this.audio.playStartWhistle();
+                    this.audio.playStartHorn();
                     this.audio.announce('FIRE!');
                 }
             } else {
@@ -555,7 +555,7 @@ class GameEngine {
         if (this.timerInterval) clearInterval(this.timerInterval);
 
         if (this.audio) {
-            this.audio.playRoundEnd();
+            this.audio.playGameOver();
             this.audio.announce("Time's up!");
         }
 
@@ -696,14 +696,17 @@ class GameEngine {
     }
 
     render() {
+        const now = performance.now();
+        const dt = Math.min(0.1, (now - this.lastFrameTime) / 1000);
+
         if (this.usePixi && this.app) {
-            this.renderPixi();
+            this.renderPixi(dt, now);
         } else if (this.fallbackCtx) {
-            this.renderCanvasFallback();
+            this.renderCanvasFallback(dt, now);
         }
     }
 
-    renderPixi() {
+    renderPixi(dt, now) {
         // 1. Draw Neon Cyber Grid Background
         if (this.bgGraphics) {
             this.bgGraphics.clear();
@@ -728,7 +731,17 @@ class GameEngine {
             }
         }
 
-        // 2. Calibration Target Render
+        // 2. Render Targets via Pixi TargetManager
+        if (this.targets && this.state === 'PLAYING') {
+            this.targets.render(dt, now);
+        }
+
+        // 3. Render Particles
+        if (this.particles) {
+            this.particles.render(null);
+        }
+
+        // 4. Calibration Target Render
         if (this.calibGraphics) {
             this.calibGraphics.clear();
             if (this.calibDot) {
@@ -756,7 +769,7 @@ class GameEngine {
             }
         }
 
-        // 3. Player Crosshairs
+        // 5. Player Crosshairs
         if (this.crosshairContainer) {
             this.crosshairContainer.removeChildren();
             const g = new PIXI.Graphics();
