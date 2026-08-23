@@ -44,7 +44,7 @@ def get_server_ip() -> str:
 async def index_redirect():
     return """
     <html>
-        <head><title>Target Range TV</title></head>
+        <head><meta charset="UTF-8"><title>Target Range TV</title></head>
         <body style="background:#0f172a; color:#f8fafc; font-family:sans-serif; text-align:center; padding-top:50px;">
             <h1>🎯 Target Range TV Hub</h1>
             <p>Pilih mode perangkat:</p>
