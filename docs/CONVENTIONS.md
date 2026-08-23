@@ -1,15 +1,17 @@
-# CONVENTIONS — Target Range TV
+# CONVENTIONS — Range Shooter (Target Range TV)
 **Standar Arsitektur, Aturan Versioning, dan Disiplin Pengembangan**
-*Version: v1.0.0*
+*Version: v2.0.0-draft*
 
 ---
 
 ## 1. Aturan Versioning (SemVer 2.0.0)
 
 Format: `MAJOR.MINOR.PATCH` (misal `v0.1.0` -> `v1.0.0`)
-- **MAJOR**: Perubahan arsitektur mendasar (misal migrasi protocol WebSocket, penggantian engine render TV).
+- **MAJOR**: Perubahan arsitektur mendasar (migrasi protocol, penggantian engine render — **v2 = PixiJS/WebGL2 + input APK native**).
 - **MINOR**: Penambahan fitur baru (mode permainan baru, variasi target baru, sistem multiplayer).
 - **PATCH**: Perbaikan bug, kalibrasi matematika sensor gyro, optimasi performa rendering TV.
+
+> **v2: PRD.md (v1) digantikan PRD-v2.md sebagai sumber kebenaran.** ADR-003, ADR-004, ADR-005 mencatat keputusan arsitektur v2. ADR-001 di-SUPERSEDE oleh ADR-003 (web controller gagal di HTTP LAN — sensor butuh secure context).
 
 ---
 
@@ -18,7 +20,8 @@ Format: `MAJOR.MINOR.PATCH` (misal `v0.1.0` -> `v1.0.0`)
 ```
 target-range-tv/
 ├── AGENTS.md                  # Panduan agen & konteks proyek
-├── PRD.md                     # Sumber kebenaran tertinggi produk (v1.0.0)
+├── PRD.md                     # PRD v1 (arsip — sumber kebenaran v1)
+├── PRD-v2.md                  # **PRD v2 — sumber kebenaran (Range Shooter v2)**
 ├── README.md                  # Ringkasan cepat & cara menjalankan
 ├── docs/
 │   ├── CONVENTIONS.md         # Dokumen ini: aturan & disiplin
@@ -29,29 +32,20 @@ target-range-tv/
 │   ├── 05-game-loop-and-states.md# Diagram state machine & alur permainan
 │   ├── 06-test-plan.md        # Rencana pengujian (unit, latency, hardware, gyro)
 │   └── adr/
-│       ├── ADR-001-websocket-lan-zero-install.md
-│       └── ADR-002-lerp-pointer-smoothing-client-side.md
+│       ├── ADR-001-websocket-lan-zero-install.md  # SUPERSEDED oleh ADR-003
+│       ├── ADR-002-lerp-pointer-smoothing-client-side.md
+│       ├── ADR-003-native-apk-input.md            # v2: input APK native (bukan web)
+│       ├── ADR-004-pixijs-renderer.md             # v2: renderer WebGL2
+│       └── ADR-005-affine-calibration-drift.md    # v2: kalibrasi 5-titik + drift
 ├── server/                    # Backend FastAPI Hub (WebSocket + Static Server)
 │   ├── main.py
 │   ├── room_manager.py
 │   └── game_state.py
-├── tv/                        # Frontend Layar TV (HTML5 Canvas / Vanilla JS / Web Audio)
-│   ├── index.html
-│   ├── js/
-│   │   ├── engine.js
-│   │   ├── targets.js
-│   │   ├── audio.js
-│   │   └── particles.js
-│   └── css/
-│       └── tv.css
-└── controller/                # Frontend Web Controller HP (HTML5 + DeviceMotion)
-    ├── index.html
-    ├── js/
-    │   ├── sensor.js
-    │   ├── haptic.js
-    │   └── ui.js
-    └── css/
-        └── controller.css
+├── tv/                        # Frontend Layar TV v1 (Canvas 2D vanilla)
+├── tv-v2/                     # **Frontend Layar TV v2 (PixiJS WebGL2 + Neon Cyber Arena)**
+├── android-controller-app/    # APK pengendali HP (SensorManager + WebSocket)
+├── android-tv-app/            # APK wrapper WebView untuk TV
+└── controller/                # (arsip v1 — web controller, TIDAK dipakai input)
 ```
 
 ---
