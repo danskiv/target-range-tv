@@ -20,14 +20,21 @@ class ControllerApp {
     }
 
     async autoDiscoverRoom() {
-        if (!this.roomCode) {
-            try {
-                const res = await fetch('/api/info');
-                const info = await res.json();
-                this.roomCode = info.latest_room || 'TG88';
-            } catch (e) {
-                this.roomCode = 'TG88';
-            }
+        // Check URL parameter first
+        const urlParam = new URLSearchParams(window.location.search).get('room');
+        if (urlParam) {
+            this.roomCode = urlParam.toUpperCase();
+            document.getElementById('input-room-code').value = this.roomCode;
+            this.startController();
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/info');
+            const info = await res.json();
+            this.roomCode = info.latest_room || 'TG88';
+        } catch (e) {
+            this.roomCode = 'TG88';
         }
         document.getElementById('input-room-code').value = this.roomCode;
     }
@@ -65,17 +72,20 @@ class ControllerApp {
 
     async toggleCameraScanner() {
         const video = document.getElementById('qr-video');
+        const container = document.getElementById('scanner-container');
         const placeholder = document.getElementById('scanner-placeholder');
         const btn = document.getElementById('btn-start-scanner');
 
         if (this.isScanning) {
             this.stopCamera();
-            btn.textContent = '📸 BUKA KAMERA & SCAN QR TV';
+            if (container) container.style.display = 'none';
+            btn.textContent = '📷 Pindai QR Barcode TV (Opsional)';
             return;
         }
 
         try {
             btn.textContent = '⏳ Membuka Kamera...';
+            if (container) container.style.display = 'block';
             
             // Try environment back camera first, fallback to user/any camera
             let stream = null;
@@ -104,8 +114,9 @@ class ControllerApp {
             requestAnimationFrame(() => this.scanQRCodeLoop());
         } catch (err) {
             console.error('[Camera Error]', err);
-            btn.textContent = '📸 BUKA KAMERA & SCAN QR TV';
-            alert(`Tidak dapat mengakses kamera (${err.name || 'Error'}). Silakan berikan izin Kamera di Pengaturan Aplikasi HP atau gunakan tombol GABUNG manual di bawah.`);
+            if (container) container.style.display = 'none';
+            btn.textContent = '📷 Pindai QR Barcode TV (Opsional)';
+            alert(`Kamera tidak dapat diakses pada protokol HTTP internal (Standar Keamanan Browser Chrome/Android). Silakan langsung tekan tombol 'GABUNG KE TV SEKARANG' di atas.`);
         }
     }
 
