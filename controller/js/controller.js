@@ -1,14 +1,14 @@
 class ControllerApp {
     constructor() {
-        this.roomCode = new URLSearchParams(window.location.search).get('room') || 'TG88';
+        this.roomCode = new URLSearchParams(window.location.search).get('room') || '';
         this.ws = null;
         this.playerId = 'P1';
         this.ammo = 6;
         this.maxAmmo = 6;
 
         // Sensor calibration offsets
-        this.originBeta = 90.0;
-        this.originGamma = 0.0;
+        this.originPitch = 0.0;
+        this.originRoll = 0.0;
         this.isCalibrated = false;
 
         // Throttling stream
@@ -16,11 +16,33 @@ class ControllerApp {
         this.streamIntervalMs = 20; // 50 Hz
 
         this.initDOM();
+        this.autoDiscoverRoom();
+    }
+
+    async autoDiscoverRoom() {
+        if (!this.roomCode) {
+            try {
+                const res = await fetch('/api/info');
+                const info = await res.json();
+                this.roomCode = info.latest_room || 'TG88';
+            } catch (e) {
+                this.roomCode = 'TG88';
+            }
+        }
+        document.getElementById('input-room-code').value = this.roomCode;
     }
 
     initDOM() {
         document.getElementById('btn-grant-permission').addEventListener('click', () => {
-            this.requestSensorPermission();
+            this.startController();
+        });
+
+        document.getElementById('btn-connect-room').addEventListener('click', () => {
+            const manualCode = document.getElementById('input-room-code').value.trim().toUpperCase();
+            if (manualCode) {
+                this.roomCode = manualCode;
+            }
+            this.startController();
         });
 
         document.getElementById('btn-recenter').addEventListener('click', () => {
@@ -41,32 +63,38 @@ class ControllerApp {
         });
     }
 
-    async requestSensorPermission() {
-        // Handle iOS 13+ permission request
-        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-            try {
-                const response = await DeviceOrientationEvent.requestPermission();
-                if (response === 'granted') {
-                    this.startSensorListeners();
-                } else {
-                    alert('Izin sensor gerak ditolak.');
-                }
-            } catch (e) {
-                console.error(e);
-            }
-        } else {
-            // Android & other modern browsers
-            this.startSensorListeners();
+    onNativeReady() {
+        // Automatically hide permission screen in Native APK
+        document.getElementById('permission-screen').style.display = 'none';
+        this.startController();
+    }
+
+    startController() {
+        const manualCode = document.getElementById('input-room-code').value.trim().toUpperCase();
+        if (manualCode) {
+            this.roomCode = manualCode;
         }
 
         // Hide intro, show controller
         document.getElementById('permission-screen').style.display = 'none';
+        this.startSensorListeners();
         this.connectWebSocket();
     }
 
     connectWebSocket() {
+        if (this.ws) {
+            this.ws.close();
+        }
+
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        this.ws = new WebSocket(`${proto}//${window.location.host}/ws/controller/${this.roomCode}`);
+        const host = window.location.host || '10.10.10.1:8095';
+        this.ws = new WebSocket(`${proto}//${host}/ws/controller/${this.roomCode}`);
+
+        document.getElementById('player-name-tag').textContent = `Menghubungkan ke ${this.roomCode}...`;
+
+        this.ws.onopen = () => {
+            document.getElementById('player-name-tag').textContent = `Terhubung (${this.roomCode})`;
+        };
 
         this.ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
@@ -75,14 +103,13 @@ class ControllerApp {
                 document.getElementById('player-name-tag').textContent = `${data.player_name} (${this.roomCode})`;
                 document.getElementById('player-name-tag').style.color = data.assigned_color;
             } else if (data.type === 'HIT_CONFIRMATION') {
-                if (navigator.vibrate) {
-                    if (data.is_bullseye) {
-                        navigator.vibrate([60, 40, 80]); // Double strong vibration
-                    } else {
-                        navigator.vibrate(35);
-                    }
-                }
+                this.doVibrate(data.is_bullseye ? 80 : 35);
             }
+        };
+
+        this.ws.onerror = (e) => {
+            document.getElementById('player-name-tag').textContent = `Koneksi Error (${this.roomCode})`;
+            document.getElementById('player-name-tag').style.color = '#ef4444';
         };
     }
 
@@ -90,8 +117,8 @@ class ControllerApp {
         // 1. Native Android App Bridge Hook
         window.onNativeSensorData = (pitch, roll, yaw) => {
             if (!this.isCalibrated) {
-                this.originBeta = pitch;
-                this.originGamma = roll;
+                this.originPitch = pitch;
+                this.originRoll = roll;
                 this.isCalibrated = true;
             }
 
@@ -99,9 +126,8 @@ class ControllerApp {
             if (now - this.lastStreamTime >= this.streamIntervalMs) {
                 this.lastStreamTime = now;
                 
-                // Invert / map correctly
-                const deltaPitch = -(pitch - this.originBeta);
-                const deltaYaw = -(roll - this.originGamma);
+                const deltaPitch = -(pitch - this.originPitch);
+                const deltaYaw = -(roll - this.originRoll);
 
                 this.sendAim(deltaPitch, deltaYaw, pitch, roll);
             }
@@ -112,8 +138,8 @@ class ControllerApp {
             if (e.beta === null || e.gamma === null) return;
 
             if (!this.isCalibrated) {
-                this.originBeta = e.beta;
-                this.originGamma = e.gamma;
+                this.originPitch = e.beta;
+                this.originRoll = e.gamma;
                 this.isCalibrated = true;
             }
 
@@ -121,8 +147,8 @@ class ControllerApp {
             if (now - this.lastStreamTime >= this.streamIntervalMs) {
                 this.lastStreamTime = now;
                 
-                const deltaPitch = e.beta - this.originBeta;
-                const deltaYaw = e.gamma - this.originGamma;
+                const deltaPitch = e.beta - this.originPitch;
+                const deltaYaw = e.gamma - this.originRoll;
 
                 this.sendAim(deltaPitch, deltaYaw, e.beta, e.gamma);
             }
@@ -130,9 +156,8 @@ class ControllerApp {
     }
 
     calibrateZero() {
-        // Request immediate zero-point calibration
         this.isCalibrated = false;
-        if (navigator.vibrate) navigator.vibrate(40);
+        this.doVibrate(40);
 
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
@@ -155,17 +180,13 @@ class ControllerApp {
 
     fireTrigger() {
         if (this.ammo <= 0) {
-            if (navigator.vibrate) navigator.vibrate([20, 20, 20]);
+            this.doVibrate(20);
             return;
         }
 
         this.ammo--;
         this.updateAmmoUI();
-
-        // Haptic Recoil
-        if (navigator.vibrate) {
-            navigator.vibrate(50);
-        }
+        this.doVibrate(50);
 
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
@@ -178,7 +199,7 @@ class ControllerApp {
     reloadAmmo() {
         this.ammo = this.maxAmmo;
         this.updateAmmoUI();
-        if (navigator.vibrate) navigator.vibrate([40, 50, 40]);
+        this.doVibrate(40);
 
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
@@ -192,6 +213,14 @@ class ControllerApp {
             this.ws.send(JSON.stringify({
                 type: 'START_GAME_REQ'
             }));
+        }
+    }
+
+    doVibrate(ms) {
+        if (window.AndroidNative && window.AndroidNative.vibrate) {
+            window.AndroidNative.vibrate(ms);
+        } else if (navigator.vibrate) {
+            navigator.vibrate(ms);
         }
     }
 

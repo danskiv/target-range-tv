@@ -17,16 +17,24 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.util.Log;
 
 public class MainActivity extends Activity implements SensorEventListener {
+    private static final String TAG = "TargetRangeController";
     private WebView webView;
     private SensorManager sensorManager;
     private Sensor rotationSensor;
-    private Sensor gyroSensor;
     private Sensor accelSensor;
+    private Sensor magneticSensor;
     private Vibrator vibrator;
+    
     private float[] rotationMatrix = new float[9];
     private float[] orientationValues = new float[3];
+    private float[] lastAccelerometer = new float[3];
+    private float[] lastMagnetometer = new float[3];
+    private boolean lastAccelerometerSet = false;
+    private boolean lastMagnetometerSet = false;
+
     private long lastSensorUpdate = 0;
     private static final String CONTROLLER_URL = "http://10.10.10.1:8095/controller";
 
@@ -34,7 +42,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Keep screen on & fullscreen
+        // Keep screen on & immersive fullscreen
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -47,10 +55,10 @@ public class MainActivity extends Activity implements SensorEventListener {
         if (sensorManager != null) {
             rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
             if (rotationSensor == null) {
-                rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION);
+                rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
             }
-            gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
             accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            magneticSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
         }
 
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
@@ -66,12 +74,23 @@ public class MainActivity extends Activity implements SensorEventListener {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
+        settings.setAllowFileAccess(true);
+        settings.setAllowContentAccess(true);
+
+        // Hardware acceleration
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         // Native JS Bridge
         webView.addJavascriptInterface(new NativeSensorBridge(), "AndroidNative");
 
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                // Auto dismiss permission modal in native app
+                webView.evaluateJavascript("if(window.controllerApp){window.controllerApp.onNativeReady();}", null);
+            }
+        });
         webView.setWebChromeClient(new WebChromeClient());
 
         webView.loadUrl(CONTROLLER_URL);
@@ -80,13 +99,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     @Override
     protected void onResume() {
         super.onResume();
-        if (sensorManager != null) {
-            if (rotationSensor != null) {
-                sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME);
-            } else if (accelSensor != null) {
-                sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_GAME);
-            }
-        }
+        registerSensors();
     }
 
     @Override
@@ -94,6 +107,21 @@ public class MainActivity extends Activity implements SensorEventListener {
         super.onPause();
         if (sensorManager != null) {
             sensorManager.unregisterListener(this);
+        }
+    }
+
+    private void registerSensors() {
+        if (sensorManager != null) {
+            if (rotationSensor != null) {
+                sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME);
+            } else {
+                if (accelSensor != null) {
+                    sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_GAME);
+                }
+                if (magneticSensor != null) {
+                    sensorManager.registerListener(this, magneticSensor, SensorManager.SENSOR_DELAY_GAME);
+                }
+            }
         }
     }
 
@@ -107,35 +135,50 @@ public class MainActivity extends Activity implements SensorEventListener {
         float pitch = 0;
         float roll = 0;
         float yaw = 0;
+        boolean hasOrientation = false;
 
-        if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR) {
+        if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR || 
+            event.sensor.getType() == Sensor.TYPE_GAME_ROTATION_VECTOR) {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values);
             SensorManager.getOrientation(rotationMatrix, orientationValues);
             
-            // Radians to degrees
             yaw = (float) Math.toDegrees(orientationValues[0]);
             pitch = (float) Math.toDegrees(orientationValues[1]);
             roll = (float) Math.toDegrees(orientationValues[2]);
-        } else if (event.sensor.getType() == Sensor.TYPE_ORIENTATION) {
-            yaw = event.values[0];
-            pitch = event.values[1];
-            roll = event.values[2];
+            hasOrientation = true;
+        } else if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+            System.arraycopy(event.values, 0, lastAccelerometer, 0, event.values.length);
+            lastAccelerometerSet = true;
+        } else if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
+            System.arraycopy(event.values, 0, lastMagnetometer, 0, event.values.length);
+            lastMagnetometerSet = true;
         }
 
-        // Push directly to WebView JS
-        final float finalPitch = pitch;
-        final float finalRoll = roll;
-        final float finalYaw = yaw;
-
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                webView.evaluateJavascript(
-                    String.format("if(window.onNativeSensorData){window.onNativeSensorData(%f, %f, %f);}", finalPitch, finalRoll, finalYaw),
-                    null
-                );
+        if (!hasOrientation && lastAccelerometerSet && lastMagnetometerSet) {
+            if (SensorManager.getRotationMatrix(rotationMatrix, null, lastAccelerometer, lastMagnetometer)) {
+                SensorManager.getOrientation(rotationMatrix, orientationValues);
+                yaw = (float) Math.toDegrees(orientationValues[0]);
+                pitch = (float) Math.toDegrees(orientationValues[1]);
+                roll = (float) Math.toDegrees(orientationValues[2]);
+                hasOrientation = true;
             }
-        });
+        }
+
+        if (hasOrientation) {
+            final float finalPitch = pitch;
+            final float finalRoll = roll;
+            final float finalYaw = yaw;
+
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    webView.evaluateJavascript(
+                        String.format("if(window.onNativeSensorData){window.onNativeSensorData(%f, %f, %f);}", finalPitch, finalRoll, finalYaw),
+                        null
+                    );
+                }
+            });
+        }
     }
 
     @Override
@@ -154,7 +197,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
 
         @JavascriptInterface
-        public boolean isNative() {
+        public boolean isNativeApp() {
             return true;
         }
     }

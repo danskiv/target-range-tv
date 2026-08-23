@@ -3,9 +3,8 @@ import json
 import socket
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 import qrcode
 from server.room_manager import manager
 
@@ -37,7 +36,7 @@ async def index_redirect():
             <h1>🎯 Target Range TV Hub</h1>
             <p>Pilih mode perangkat:</p>
             <div style="margin-top:20px;">
-                <a href="/tv" style="display:inline-block; padding:12px 24px; background:#3b82f6; color:#fff; text-decoration:none; border-radius:8px; margin:10px;">📺 Buka Layar TV (/tv)</a>
+                <a href="/tv" style="display:inline-block; padding:12px 24px; background:#3b82f6; color:#fff; text-decoration:none; border-radius:8px; margin:10px;">📺 Buka Layar TV / Laptop (/tv)</a>
                 <a href="/controller" style="display:inline-block; padding:12px 24px; background:#10b981; color:#fff; text-decoration:none; border-radius:8px; margin:10px;">📱 Buka Controller HP (/controller)</a>
             </div>
         </body>
@@ -72,7 +71,15 @@ async def generate_qr(url: str):
 @app.get("/api/info")
 async def get_info():
     ip = get_server_ip()
-    return {"server_ip": ip, "default_port": 8095}
+    # Find latest active room if any
+    active_rooms = list(manager.rooms.keys())
+    latest_room = active_rooms[-1] if active_rooms else "TG88"
+    return {
+        "server_ip": ip,
+        "default_port": 8095,
+        "active_rooms": active_rooms,
+        "latest_room": latest_room
+    }
 
 # ==================== WEBSOCKET ENDPOINTS ====================
 
@@ -120,9 +127,8 @@ async def ws_controller_endpoint(websocket: WebSocket, room_code: str):
     room_code = room_code.upper()
     room = manager.get_room(room_code)
     if not room:
-        await websocket.send_json({"type": "ERROR", "message": "Room tidak ditemukan!"})
-        await websocket.close()
-        return
+        # If room does not exist, auto-create it so controller never fails to connect
+        room = manager.create_room(room_code)
 
     player_id = f"P{len(room.players) + 1}"
     player = room.add_player(player_id, websocket, f"Pendekar {len(room.players)+1}")
@@ -153,7 +159,6 @@ async def ws_controller_endpoint(websocket: WebSocket, room_code: str):
             data["room_code"] = room_code
 
             if event_type == "AIM_UPDATE":
-                # High frequency stream directly forwarded to TV
                 await room.broadcast_to_tv(data)
 
             elif event_type == "TRIGGER_FIRE":
