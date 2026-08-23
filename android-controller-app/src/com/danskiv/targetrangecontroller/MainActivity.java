@@ -48,8 +48,10 @@ import org.json.JSONObject;
 
 public class MainActivity extends Activity implements SensorEventListener {
     private static final String TAG = "TargetRangePureNative";
-    private static final String SERVER_HOST = "10.10.10.1";
-    private static final int SERVER_PORT = 8095;
+    private static final String DEFAULT_SERVER_HOST = "10.10.10.1";
+    private static final int DEFAULT_SERVER_PORT = 8095;
+    private String serverHost = DEFAULT_SERVER_HOST;
+    private int serverPort = DEFAULT_SERVER_PORT;
 
     // WS message types (server main.py /ws/controller/{room_code})
     private static final String WS_AIM = "AIM_UPDATE";
@@ -128,6 +130,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     // Native UI Components
     private LinearLayout pairingView;
     private LinearLayout controllerView;
+    private EditText inputServerIp;
     private EditText inputRoomCode;
     private TextView txtStatus;
     private TextView txtPlayerBadge;
@@ -218,6 +221,26 @@ public class MainActivity extends Activity implements SensorEventListener {
         codeBox.setPadding(30, 30, 30, 30);
         codeBox.setGravity(Gravity.CENTER);
 
+        TextView lblIp = new TextView(this);
+        lblIp.setText("IP SERVER HUB:");
+        lblIp.setTextColor(Color.parseColor("#cbd5e1"));
+        lblIp.setTextSize(11);
+        lblIp.setTypeface(null, Typeface.BOLD);
+        codeBox.addView(lblIp);
+
+        inputServerIp = new EditText(this);
+        inputServerIp.setText(serverHost);
+        inputServerIp.setTextColor(Color.parseColor("#38bdf8"));
+        inputServerIp.setTextSize(18);
+        inputServerIp.setTypeface(null, Typeface.BOLD);
+        inputServerIp.setGravity(Gravity.CENTER);
+        inputServerIp.setBackgroundColor(Color.parseColor("#020617"));
+        inputServerIp.setPadding(20, 10, 20, 10);
+        LinearLayout.LayoutParams ipLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ipLp.setMargins(0, 8, 0, 15);
+        inputServerIp.setLayoutParams(ipLp);
+        codeBox.addView(inputServerIp);
+
         TextView lblCode = new TextView(this);
         lblCode.setText("KODE ROOM TV AKTIF:");
         lblCode.setTextColor(Color.parseColor("#cbd5e1"));
@@ -228,13 +251,13 @@ public class MainActivity extends Activity implements SensorEventListener {
         inputRoomCode = new EditText(this);
         inputRoomCode.setText("TG88");
         inputRoomCode.setTextColor(Color.parseColor("#38bdf8"));
-        inputRoomCode.setTextSize(28);
+        inputRoomCode.setTextSize(26);
         inputRoomCode.setTypeface(null, Typeface.BOLD);
         inputRoomCode.setGravity(Gravity.CENTER);
         inputRoomCode.setBackgroundColor(Color.parseColor("#020617"));
-        inputRoomCode.setPadding(20, 15, 20, 15);
+        inputRoomCode.setPadding(20, 10, 20, 10);
         LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        inputLp.setMargins(0, 15, 0, 20);
+        inputLp.setMargins(0, 8, 0, 20);
         inputRoomCode.setLayoutParams(inputLp);
         codeBox.addView(inputRoomCode);
 
@@ -248,6 +271,10 @@ public class MainActivity extends Activity implements SensorEventListener {
         btnJoin.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (inputServerIp != null) {
+                    String ip = inputServerIp.getText().toString().trim();
+                    if (!ip.isEmpty()) serverHost = ip;
+                }
                 String code = inputRoomCode.getText().toString().trim().toUpperCase();
                 if (!code.isEmpty()) currentRoom = code;
                 pairingView.setVisibility(View.GONE);
@@ -403,7 +430,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             @Override
             public void run() {
                 try {
-                    URL url = new URL("http://" + SERVER_HOST + ":" + SERVER_PORT + "/api/info");
+                    URL url = new URL("http://" + serverHost + ":" + serverPort + "/api/info");
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setConnectTimeout(2500);
                     conn.setReadTimeout(2500);
@@ -420,8 +447,8 @@ public class MainActivity extends Activity implements SensorEventListener {
                             @Override
                             public void run() {
                                 currentRoom = latest;
-                                inputRoomCode.setText(latest);
-                                txtStatus.setText("🟢 Room TV Terdeteksi: " + latest);
+                                if (inputRoomCode != null) inputRoomCode.setText(latest);
+                                if (txtStatus != null) txtStatus.setText("🟢 Room TV Terdeteksi: " + latest);
                             }
                         });
                     }
@@ -636,7 +663,7 @@ public class MainActivity extends Activity implements SensorEventListener {
      */
     private void connectWebSocket() {
         try {
-            String wsUrl = "ws://" + SERVER_HOST + ":" + SERVER_PORT + "/ws/controller/" + currentRoom;
+            String wsUrl = "ws://" + serverHost + ":" + serverPort + "/ws/controller/" + currentRoom;
             wsClient = new WebSocketClient(new URI(wsUrl)) {
                 @Override
                 public void onOpen(ServerHandshake handshakedata) {
@@ -796,7 +823,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                 payload.put("roll", extra.optDouble("roll", 0.0));
                 payload.put("yaw", extra.optDouble("yaw", 0.0));
             }
-            URL url = new URL("http://" + SERVER_HOST + ":" + SERVER_PORT + "/api/controller/aim");
+            URL url = new URL("http://" + serverHost + ":" + serverPort + "/api/controller/aim");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
@@ -820,7 +847,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             if (extra != null && extra.has("index")) {
                 payload.put("index", extra.optInt("index", 0));
             }
-            URL url = new URL("http://" + SERVER_HOST + ":" + SERVER_PORT + "/api/controller/action");
+            URL url = new URL("http://" + serverHost + ":" + serverPort + "/api/controller/action");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
