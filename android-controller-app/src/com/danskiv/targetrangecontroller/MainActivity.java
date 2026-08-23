@@ -416,8 +416,13 @@ public class MainActivity extends Activity implements SensorEventListener {
                 calibA2 = prefs.getFloat("a2", 0); calibA3 = prefs.getFloat("a3", 0);
                 calibB0 = prefs.getFloat("b0", 0); calibB1 = prefs.getFloat("b1", 0);
                 calibB2 = prefs.getFloat("b2", 0); calibB3 = prefs.getFloat("b3", 0);
-                calibReady = true;
-                if (btnCalib != null) {
+                // Reject degenerate transforms (all sensor coefficients ~0): they
+                // pin the crosshair to a corner. Fall back to delta mapping until
+                // a proper 5-point calibration overwrites them.
+                float sensorAmp = Math.abs(calibA1) + Math.abs(calibA2) + Math.abs(calibA3)
+                                + Math.abs(calibB1) + Math.abs(calibB2) + Math.abs(calibB3);
+                calibReady = sensorAmp > 0.001f;
+                if (calibReady && btnCalib != null) {
                     btnCalib.setText("✅ KALIBRASI TERSIMPAN (Tekan untuk ulang)");
                     btnCalib.setBackgroundColor(Color.parseColor("#22c55e"));
                 }
@@ -469,21 +474,52 @@ public class MainActivity extends Activity implements SensorEventListener {
             sendCalibDot(calibIndex);
         } else {
             computeAffine();
-            calibActive = false;
-            calibReady = true;
-            saveCalibration();
-            doVibrate(150);
-            mainHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    if (btnCalib != null) {
-                        btnCalib.setText("✅ KALIBRASI SELESAI! (Tekan untuk ulang)");
-                        btnCalib.setBackgroundColor(Color.parseColor("#22c55e"));
+            if (isTransformGood()) {
+                calibActive = false;
+                calibReady = true;
+                saveCalibration();
+                doVibrate(150);
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (btnCalib != null) {
+                            btnCalib.setText("✅ KALIBRASI SELESAI! (Tekan untuk ulang)");
+                            btnCalib.setBackgroundColor(Color.parseColor("#22c55e"));
+                        }
                     }
-                }
-            });
-            sendHttpAction("calib_done");
+                });
+                sendHttpAction("calib_done");
+            } else {
+                // Bad fit (e.g. shots fired at random positions while the dots
+                // were not visible) — reject it, keep the previous transform and
+                // restart the sequence instead of saving a degenerate mapping.
+                calibIndex = 0;
+                calibSamples.clear();
+                doVibrate(new int[]{80, 80});
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (btnCalib != null) {
+                            btnCalib.setText("❌ KALIBRASI GAGAL — arahkan TEPAT ke titik kuning lalu tembak. Ulangi dari awal!");
+                            btnCalib.setBackgroundColor(Color.parseColor("#ef4444"));
+                        }
+                    }
+                });
+                updateCalibUI();
+                sendCalibDot(0);
+            }
         }
+    }
+
+    private boolean isTransformGood() {
+        // Re-apply the fitted transform to the calibration samples; if it misses
+        // any target by more than 30% of the screen, the fit is garbage.
+        for (float[] s : calibSamples) {
+            float ex = calibA0 + calibA1 * s[0] + calibA2 * s[1] + calibA3 * s[2];
+            float ey = calibB0 + calibB1 * s[0] + calibB2 * s[1] + calibB3 * s[2];
+            if (Math.abs(ex - s[3]) > 0.30f || Math.abs(ey - s[4]) > 0.30f) return false;
+        }
+        return true;
     }
 
     private void computeAffine() {
@@ -685,6 +721,20 @@ public class MainActivity extends Activity implements SensorEventListener {
                     vibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE));
                 } else {
                     vibrator.vibrate(ms);
+                }
+            }
+        } catch (Exception e) {}
+    }
+
+    private void doVibrate(int[] pattern) {
+        try {
+            if (vibrator != null) {
+                long[] p = new long[pattern.length];
+                for (int i = 0; i < pattern.length; i++) p[i] = pattern[i];
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createWaveform(p, -1));
+                } else {
+                    vibrator.vibrate(p, -1);
                 }
             }
         } catch (Exception e) {}
