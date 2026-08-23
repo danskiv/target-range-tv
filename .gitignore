@@ -1,0 +1,8 @@
+# Environment & Python
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Logs
+*.log
