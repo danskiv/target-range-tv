@@ -283,6 +283,8 @@ public class MainActivity extends Activity implements SensorEventListener {
                 calibrateZero();
                 connectWebSocket();   // v2: open WS channel to /ws/controller/{room}
                 startNativeAimLoop();
+                // Auto-start game on first join so TV leaves lobby screen
+                sendAction(WS_START_GAME);
             }
         });
         codeBox.addView(btnJoin);
