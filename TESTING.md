@@ -6,7 +6,8 @@ Strategi pengujian. Detail kasus: [`docs/06-test-plan.md`](docs/06-test-plan.md)
 Python `pytest` di `server/`.
 
 ```bash
-cd server && ../venv/bin/python -m pytest -q
+cd /home/ubuntu/Github/target-range-tv
+PYTHONPATH=. ./venv/bin/pytest -v server/test_server.py
 ```
 
 Cakupan:
