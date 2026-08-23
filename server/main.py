@@ -28,6 +28,12 @@ async def no_cache_middleware(request, call_next):
     return response
 
 def get_server_ip() -> str:
+    # Allow forcing the advertised IP (WireGuard wg0) via env var — the
+    # default-route interface on a cloud VPS is NOT where TV/phone are.
+    import os
+    forced = os.environ.get("RANGE_SERVER_IP")
+    if forced:
+        return forced
     # Detect the LAN/WiFi IP that phones should connect to when the server
     # runs locally (same home network as TV + phone).
     candidates = []
@@ -44,8 +50,11 @@ def get_server_ip() -> str:
         except Exception:
             pass
     ip = candidates[0] if candidates else "127.0.0.1"
-    # Prefer a home-LAN style address (192.168.x / 172.16-31.x) over 10.x
-    # so we do not advertise the WireGuard subnet when both exist.
+    # Prefer the WireGuard subnet (10.10.10.x) so TV/phone on wg0 can reach
+    # the server, then home-LAN style (192.168.x / 172.16-31.x), then any 10.x.
+    for c in candidates:
+        if c.startswith("10.10.10."):
+            return c
     for c in candidates:
         if c.startswith("192.168.") or c.startswith("172."):
             return c
