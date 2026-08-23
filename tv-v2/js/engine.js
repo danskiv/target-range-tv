@@ -234,7 +234,11 @@ class GameEngine {
             case 'PLAYER_JOINED':
                 this.registerPlayer(data.player_id, data.player_name, data.color);
                 this.updateLobbyPlayersUI();
-                if (this.audio) this.audio.playTick(520);
+                if (this.audio) this.audio.playCountdownTick();
+                // Auto-start match when first pilot connects so TV never stays stuck on lobby
+                if (this.state === 'LOBBY') {
+                    this.startCountdown();
+                }
                 break;
 
             case 'PLAYER_LEFT':

@@ -283,8 +283,14 @@ public class MainActivity extends Activity implements SensorEventListener {
                 calibrateZero();
                 connectWebSocket();   // v2: open WS channel to /ws/controller/{room}
                 startNativeAimLoop();
-                // Auto-start game on first join so TV leaves lobby screen
-                sendAction(WS_START_GAME);
+                // Send explicit start game action after a short 300ms delay to ensure WS handshakes
+                actionExecutor.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        try { Thread.sleep(400); } catch (Exception e) {}
+                        sendAction(WS_START_GAME);
+                    }
+                });
             }
         });
         codeBox.addView(btnJoin);
