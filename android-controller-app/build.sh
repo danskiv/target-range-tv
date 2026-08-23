@@ -4,6 +4,7 @@ set -e
 APP_DIR="/home/ubuntu/Github/target-range-tv/android-controller-app"
 ANDROID_JAR="/home/ubuntu/android-31.jar"
 R8_JAR="/home/ubuntu/r8.jar"
+LIBS_JAR="$APP_DIR/libs/java-websocket.jar"
 OUT_DIR="$APP_DIR/bin"
 OBJ_DIR="$APP_DIR/obj"
 
@@ -19,14 +20,15 @@ aapt package -f -m \
     -I "$ANDROID_JAR"
 
 echo "=== 3. Compiling Java classes ==="
-javac -source 1.8 -target 1.8 -d "$OBJ_DIR" -cp "$ANDROID_JAR" \
+javac -source 1.8 -target 1.8 -d "$OBJ_DIR" -cp "$ANDROID_JAR:$LIBS_JAR" \
     "$APP_DIR/src/com/danskiv/targetrangecontroller/"*.java
 
 echo "=== 4. Dexing classes with D8/R8 ==="
 java -cp "$R8_JAR" com.android.tools.r8.D8 \
     --output "$OUT_DIR/" \
     --lib "$ANDROID_JAR" \
-    "$OBJ_DIR/com/danskiv/targetrangecontroller/"*.class
+    "$OBJ_DIR/com/danskiv/targetrangecontroller/"*.class \
+    "$LIBS_JAR"
 
 echo "=== 5. Packaging APK ==="
 aapt package -f \
