@@ -6,13 +6,14 @@ class ControllerApp {
         this.ammo = 6;
         this.maxAmmo = 6;
 
-        // Sensor calibration offsets
+        // Calibration offsets
         this.originPitch = 0.0;
         this.originRoll = 0.0;
         this.isCalibrated = false;
 
-        // Polling timer for high-performance pull
-        this.sensorPollInterval = null;
+        // Camera stream
+        this.videoStream = null;
+        this.isScanning = false;
 
         this.initDOM();
         this.autoDiscoverRoom();
@@ -32,8 +33,8 @@ class ControllerApp {
     }
 
     initDOM() {
-        document.getElementById('btn-grant-permission').addEventListener('click', () => {
-            this.startController();
+        document.getElementById('btn-start-scanner').addEventListener('click', () => {
+            this.toggleCameraScanner();
         });
 
         document.getElementById('btn-connect-room').addEventListener('click', () => {
@@ -62,19 +63,96 @@ class ControllerApp {
         });
     }
 
-    onNativeReady() {
-        // Native APK bypasses permission modal completely
-        document.getElementById('permission-screen').style.display = 'none';
-        this.startController();
+    async toggleCameraScanner() {
+        const video = document.getElementById('qr-video');
+        const placeholder = document.getElementById('scanner-placeholder');
+        const btn = document.getElementById('btn-start-scanner');
+
+        if (this.isScanning) {
+            this.stopCamera();
+            btn.textContent = '📸 BUKA KAMERA & SCAN QR TV';
+            return;
+        }
+
+        try {
+            btn.textContent = '⏳ Membuka Kamera...';
+            const constraints = {
+                video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+            };
+
+            this.videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = this.videoStream;
+            video.setAttribute('playsinline', true);
+            await video.play();
+
+            video.style.display = 'block';
+            placeholder.style.display = 'none';
+            btn.textContent = '❌ TUTUP KAMERA';
+            this.isScanning = true;
+
+            requestAnimationFrame(() => this.scanQRCodeLoop());
+        } catch (err) {
+            console.error('[Camera Error]', err);
+            alert('Tidak dapat mengakses kamera. Pastikan izin kamera telah diberikan atau gunakan input manual Kode Room di bawah.');
+            btn.textContent = '📸 BUKA KAMERA & SCAN QR TV';
+        }
+    }
+
+    scanQRCodeLoop() {
+        if (!this.isScanning) return;
+        const video = document.getElementById('qr-video');
+        const canvas = document.getElementById('qr-canvas');
+        const ctx = canvas.getContext('2d');
+
+        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            canvas.height = video.videoHeight;
+            canvas.width = video.videoWidth;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            if (window.jsQR) {
+                const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: 'dontInvert',
+                });
+
+                if (code && code.data) {
+                    this.doVibrate(60);
+                    // Extract room code from URL or text
+                    let detectedRoom = code.data;
+                    if (code.data.includes('room=')) {
+                        detectedRoom = code.data.split('room=')[1].split('&')[0];
+                    }
+                    this.roomCode = detectedRoom.toUpperCase();
+                    document.getElementById('input-room-code').value = this.roomCode;
+                    this.stopCamera();
+                    this.startController();
+                    return;
+                }
+            }
+        }
+        requestAnimationFrame(() => this.scanQRCodeLoop());
+    }
+
+    stopCamera() {
+        this.isScanning = false;
+        if (this.videoStream) {
+            this.videoStream.getTracks().forEach(track => track.stop());
+            this.videoStream = null;
+        }
+        document.getElementById('qr-video').style.display = 'none';
+        document.getElementById('scanner-placeholder').style.display = 'block';
     }
 
     startController() {
+        this.stopCamera();
         const manualCode = document.getElementById('input-room-code').value.trim().toUpperCase();
         if (manualCode) {
             this.roomCode = manualCode;
         }
 
         document.getElementById('permission-screen').style.display = 'none';
+        document.getElementById('controller-app').style.display = 'flex';
+        
         this.startSensorLoop();
         this.connectWebSocket();
     }
@@ -113,16 +191,12 @@ class ControllerApp {
     }
 
     startSensorLoop() {
-        // High frequency pull loop (60 FPS / ~16ms)
-        if (this.sensorPollInterval) clearInterval(this.sensorPollInterval);
-
-        this.sensorPollInterval = setInterval(() => {
+        setInterval(() => {
             let pitch = 0;
             let roll = 0;
             let yaw = 0;
             let hasData = false;
 
-            // 1. Check Native Android Bridge (Direct zero-overhead pull)
             if (window.AndroidNative && window.AndroidNative.isSensorActive && window.AndroidNative.isSensorActive()) {
                 pitch = window.AndroidNative.getPitch();
                 roll = window.AndroidNative.getRoll();
@@ -144,9 +218,8 @@ class ControllerApp {
             }
         }, 16);
 
-        // 2. Browser HTML5 Fallback
         window.addEventListener('deviceorientation', (e) => {
-            if (window.AndroidNative) return; // Ignore if native is active
+            if (window.AndroidNative) return;
             if (e.beta === null || e.gamma === null) return;
 
             if (!this.isCalibrated) {

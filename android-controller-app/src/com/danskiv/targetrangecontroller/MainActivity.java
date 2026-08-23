@@ -2,6 +2,7 @@ package com.danskiv.targetrangecontroller;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -13,16 +14,17 @@ import android.os.Build;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.ConsoleMessage;
 import android.util.Log;
-import java.util.Locale;
 
 public class MainActivity extends Activity implements SensorEventListener {
     private static final String TAG = "TargetRangeController";
+    private static final int CAMERA_REQ_CODE = 200;
 
     private WebView webView;
     private SensorManager sensorManager;
@@ -38,19 +40,19 @@ public class MainActivity extends Activity implements SensorEventListener {
     private boolean lastAccelerometerSet = false;
     private boolean lastMagnetometerSet = false;
 
-    // Direct native state accessed via JS Interface
     private volatile float currentPitch = 0.0f;
     private volatile float currentRoll = 0.0f;
     private volatile float currentYaw = 0.0f;
     private volatile boolean sensorActive = false;
 
+    private PermissionRequest currentWebPermissionRequest;
     private static final String CONTROLLER_URL = "http://10.10.10.1:8095/controller";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Keep screen alive & immersive
+        // Keep screen on & immersive fullscreen
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -61,6 +63,31 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         initSensors();
         initWebView();
+        requestNativeCameraPermission();
+    }
+
+    private void requestNativeCameraPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (checkSelfPermission(android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{android.Manifest.permission.CAMERA}, CAMERA_REQ_CODE);
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == CAMERA_REQ_CODE && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            if (currentWebPermissionRequest != null) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        currentWebPermissionRequest.grant(currentWebPermissionRequest.getResources());
+                        currentWebPermissionRequest = null;
+                    }
+                });
+            }
+        }
     }
 
     private void initSensors() {
@@ -93,22 +120,33 @@ public class MainActivity extends Activity implements SensorEventListener {
         settings.setAllowContentAccess(true);
 
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        
-        // Expose Native Object directly to Javascript
         webView.addJavascriptInterface(new NativeSensorBridge(), "AndroidNative");
 
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                webView.evaluateJavascript("if(window.controllerApp){window.controllerApp.onNativeReady();}", null);
-            }
-        });
+        webView.setWebViewClient(new WebViewClient());
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                currentWebPermissionRequest = request;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    if (checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                request.grant(request.getResources());
+                            }
+                        });
+                    } else {
+                        requestPermissions(new String[]{android.Manifest.permission.CAMERA}, CAMERA_REQ_CODE);
+                    }
+                } else {
+                    request.grant(request.getResources());
+                }
+            }
+
+            @Override
             public boolean onConsoleMessage(ConsoleMessage cm) {
-                Log.d(TAG, "[WebView Console] " + cm.message() + " -- From line " + cm.lineNumber());
+                Log.d(TAG, "[WebView Console] " + cm.message());
                 return true;
             }
         });
