@@ -81,6 +81,46 @@ async def get_info():
         "latest_room": latest_room
     }
 
+# ==================== NATIVE HTTP REST API (FALLBACK & ZERO-WS) ====================
+
+@app.post("/api/controller/aim")
+async def api_controller_aim(request: Request):
+    try:
+        data = await request.json()
+        room_code = data.get("room_code", "TG88").upper()
+        room = manager.get_room(room_code)
+        if room and room.tv_socket:
+            await room.broadcast_to_tv({
+                "type": "AIM_UPDATE",
+                "player_id": data.get("player_id", "P1"),
+                "x": data.get("x", 0.5),
+                "y": data.get("y", 0.5),
+                "pitch": data.get("pitch", 0.0),
+                "roll": data.get("roll", 0.0),
+                "yaw": data.get("yaw", 0.0)
+            })
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/controller/action")
+async def api_controller_action(request: Request):
+    try:
+        data = await request.json()
+        room_code = data.get("room_code", "TG88").upper()
+        action_type = data.get("action") # "shoot", "reload", "start_game", "calibrate"
+        room = manager.get_room(room_code)
+        if room and room.tv_socket:
+            if action_type == "shoot":
+                await room.broadcast_to_tv({"type": "TRIGGER_FIRE", "player_id": data.get("player_id", "P1")})
+            elif action_type == "reload":
+                await room.broadcast_to_tv({"type": "RELOAD_ACTION", "player_id": data.get("player_id", "P1")})
+            elif action_type == "start_game":
+                await room.broadcast_to_tv({"type": "START_GAME_REQ", "player_id": data.get("player_id", "P1")})
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # ==================== WEBSOCKET ENDPOINTS ====================
 
 @app.websocket("/ws/tv/{room_code}")
