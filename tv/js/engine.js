@@ -2,11 +2,19 @@ class GameEngine {
     constructor() {
         this.canvas = document.getElementById('tv-canvas');
         this.ctx = this.canvas.getContext('2d');
-        this.width = 1920;
-        this.height = 1080;
-        
+        // Responsive: fill the actual TV viewport (720p / 1080p / whatever).
+        this.width = window.innerWidth || this.canvas.clientWidth || 1920;
+        this.height = window.innerHeight || this.canvas.clientHeight || 1080;
+
         this.canvas.width = this.width;
         this.canvas.height = this.height;
+        // Keep canvas pixels synced if the window resizes.
+        window.addEventListener('resize', () => {
+            this.width = window.innerWidth || this.canvas.clientWidth || this.width;
+            this.height = window.innerHeight || this.canvas.clientHeight || this.height;
+            this.canvas.width = this.width;
+            this.canvas.height = this.height;
+        });
 
         this.roomCode = null; // resolved in initNetworking() — reuse latest room
         this.ws = null;
@@ -161,9 +169,11 @@ class GameEngine {
                 window.particlePool.addFloatingText('KALIBRASI OK', this.width / 2, this.height / 2, '#4ade80');
             }
         } else if (data.type === 'CALIB_START') {
-            // Hide the lobby overlay — the calibration dot is drawn on the canvas
-            // and must be visible (the lobby would otherwise cover it).
+            // Hide the lobby overlay AND the HUD — the calibration dot is drawn
+            // on the canvas and must be visible and unobstructed.
             document.getElementById('lobby-screen').style.display = 'none';
+            const hud = document.querySelector('.overlay-layer');
+            if (hud) hud.style.display = 'none';
             this.calibDot = Object.assign({ index: 0, time: performance.now() }, this.calibPoints[0]);
         } else if (data.type === 'CALIB_DOT') {
             const idx = Math.max(0, Math.min(data.index || 0, this.calibPoints.length - 1));
@@ -171,6 +181,8 @@ class GameEngine {
         } else if (data.type === 'CALIB_DONE') {
             this.calibDot = null;
             document.getElementById('lobby-screen').style.display = 'flex';
+            const hud = document.querySelector('.overlay-layer');
+            if (hud) hud.style.display = 'flex';
         } else if (data.type === 'START_GAME_REQ') {
             if (this.state === 'LOBBY') {
                 this.startCountdown();
@@ -388,7 +400,9 @@ class GameEngine {
             const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 2);
             const cx = this.calibDot.x * this.width;
             const cy = this.calibDot.y * this.height;
-            const r = 30 + pulse * 16;
+            // Keep the dot fully on-screen at true-corner positions (5% margin):
+            // cap radius relative to the smaller viewport dimension.
+            const r = Math.min(32, Math.max(18, Math.min(this.width, this.height) * 0.03)) + pulse * 8;
             this.ctx.save();
             this.ctx.strokeStyle = '#facc15';
             this.ctx.lineWidth = 5;
@@ -401,11 +415,22 @@ class GameEngine {
             this.ctx.fill();
             this.ctx.fillStyle = '#facc15';
             this.ctx.font = 'bold 34px sans-serif';
-            this.ctx.textAlign = 'center';
-            // Keep the label on-screen: below the dot for top rows, above for bottom/center.
+            // Smart label placement: keep it fully on-screen no matter which
+            // corner the dot sits in.
+            const label = `TITIK ${this.calibDot.index + 1}/5 — ARAHKAN & TEMBAK!`;
             let labelY = cy - r - 20;
             if (labelY < 80) labelY = cy + r + 50;
-            this.ctx.fillText(`TITIK ${this.calibDot.index + 1}/5 — ARAHKAN & TEMBAK!`, cx, labelY);
+            let labelX = cx;
+            this.ctx.textAlign = 'center';
+            const textW = this.ctx.measureText(label).width;
+            if (cx < textW / 2 + 10) {            // left edge: shift right
+                this.ctx.textAlign = 'left';
+                labelX = cx + r + 20;
+            } else if (cx > this.width - textW / 2 - 10) { // right edge: shift left
+                this.ctx.textAlign = 'right';
+                labelX = cx - r - 20;
+            }
+            this.ctx.fillText(label, labelX, labelY);
             this.ctx.restore();
         }
     }
