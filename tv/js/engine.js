@@ -18,10 +18,10 @@ class GameEngine {
         // 5-point calibration overlay (center + 4 corners, normalized 0..1)
         this.calibPoints = [
             { x: 0.50, y: 0.50 }, // 0 center
-            { x: 0.12, y: 0.12 }, // 1 top-left
-            { x: 0.88, y: 0.12 }, // 2 top-right
-            { x: 0.88, y: 0.88 }, // 3 bottom-right
-            { x: 0.12, y: 0.88 }  // 4 bottom-left
+            { x: 0.05, y: 0.05 }, // 1 top-left (true corner)
+            { x: 0.95, y: 0.05 }, // 2 top-right
+            { x: 0.95, y: 0.95 }, // 3 bottom-right
+            { x: 0.05, y: 0.95 }  // 4 bottom-left
         ];
         this.calibDot = null; // {x, y, index, time} while calibrating
 
@@ -402,7 +402,10 @@ class GameEngine {
             this.ctx.fillStyle = '#facc15';
             this.ctx.font = 'bold 34px sans-serif';
             this.ctx.textAlign = 'center';
-            this.ctx.fillText(`TITIK ${this.calibDot.index + 1}/5 — ARAHKAN & TEMBAK!`, cx, cy - r - 20);
+            // Keep the label on-screen: below the dot for top rows, above for bottom/center.
+            let labelY = cy - r - 20;
+            if (labelY < 80) labelY = cy + r + 50;
+            this.ctx.fillText(`TITIK ${this.calibDot.index + 1}/5 — ARAHKAN & TEMBAK!`, cx, labelY);
             this.ctx.restore();
         }
     }

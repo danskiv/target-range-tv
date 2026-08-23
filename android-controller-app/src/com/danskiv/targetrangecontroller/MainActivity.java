@@ -75,10 +75,10 @@ public class MainActivity extends Activity implements SensorEventListener {
     // ---- 5-point affine calibration (center + 4 corners) ----
     private static final float[][] CALIB_POINTS = {
         {0.50f, 0.50f}, // 0 center
-        {0.12f, 0.12f}, // 1 top-left
-        {0.88f, 0.12f}, // 2 top-right
-        {0.88f, 0.88f}, // 3 bottom-right
-        {0.12f, 0.88f}  // 4 bottom-left
+        {0.05f, 0.05f}, // 1 top-left (true corner)
+        {0.95f, 0.05f}, // 2 top-right
+        {0.95f, 0.95f}, // 3 bottom-right
+        {0.05f, 0.95f}  // 4 bottom-left
     };
     private boolean calibActive = false;
     private int calibIndex = 0;
