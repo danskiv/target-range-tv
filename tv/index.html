@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Target Range TV — Layar Utama</title>
+    <link rel="stylesheet" href="/tv_static/css/tv.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="game-container">
+        <!-- Render Canvas 2D -->
+        <canvas id="tv-canvas"></canvas>
+
+        <!-- Top HUD -->
+        <div class="overlay-layer">
+            <div class="hud-header">
+                <div class="room-badge" id="hud-room-code">ROOM: ----</div>
+                <div class="score-panel">
+                    <div class="score-box timer-box">
+                        <div class="label">Sisa Waktu</div>
+                        <div class="val" id="hud-timer">60s</div>
+                    </div>
+                    <div class="score-box combo-box">
+                        <div class="label">Combo</div>
+                        <div class="val" id="hud-combo">1x</div>
+                    </div>
+                    <div class="score-box">
+                        <div class="label">Skor Total</div>
+                        <div class="val" id="hud-score">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Big Center Text (3, 2, 1, FIRE, WAKTU HABIS) -->
+        <div id="center-announcement">3</div>
+
+        <!-- Lobby Overlay Screen -->
+        <div id="lobby-screen">
+            <div class="lobby-content">
+                <div class="qr-section">
+                    <div class="qr-card">
+                        <img id="qr-image" src="" alt="QR Code Controller">
+                    </div>
+                    <p style="margin-top: 14px; font-size: 18px; color: #94a3b8;">Pindai dengan Kamera HP</p>
+                </div>
+                <div class="lobby-info">
+                    <h1>🎯 Target Range TV</h1>
+                    <p>Ubah HP Anda menjadi senjata kendali gerak (Air Gun)!</p>
+                    <div class="room-display">KODE ROOM: <span id="room-code-display">----</span></div>
+                    
+                    <div class="player-list">
+                        <strong>Daftar Pemain:</strong>
+                        <ul id="lobby-players" style="list-style: none; margin-top: 8px;">
+                            <li>Menunggu pemain terhubung...</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/tv_static/js/audio.js"></script>
+    <script src="/tv_static/js/particles.js"></script>
+    <script src="/tv_static/js/targets.js"></script>
+    <script src="/tv_static/js/engine.js"></script>
+</body>
+</html>

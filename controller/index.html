@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Target Range — Air Gun Controller</title>
+    <link rel="stylesheet" href="/ctrl_static/css/controller.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Permission / Intro Modal -->
+    <div id="permission-screen">
+        <div class="intro-card">
+            <h2>🎯 Target Range TV</h2>
+            <p>Arahkan moncong HP Anda ke layar TV layaknya senjata laser untuk mengendalikan bidikan.</p>
+            <button id="btn-grant-permission" class="btn-primary">Mulai & Izinkan Sensor</button>
+        </div>
+    </div>
+
+    <!-- Main Controller App -->
+    <div id="controller-app">
+        <!-- Top Status Bar -->
+        <div class="header-bar">
+            <div class="player-badge" id="player-name-tag">Menghubungkan...</div>
+            <div class="ammo-indicator">
+                <div class="bullet-dot"></div>
+                <div class="bullet-dot"></div>
+                <div class="bullet-dot"></div>
+                <div class="bullet-dot"></div>
+                <div class="bullet-dot"></div>
+                <div class="bullet-dot"></div>
+            </div>
+        </div>
+
+        <!-- Calibration Button -->
+        <div class="calibration-bar">
+            <button id="btn-recenter" class="btn-recenter">🎯 ARAHKAN KE TENGAH TV & KALIBRASI</button>
+        </div>
+
+        <!-- Big Trigger Area -->
+        <div id="trigger-area" class="trigger-zone">
+            <div class="trigger-text">TEMBAK</div>
+            <div class="trigger-subtext">Sentuh Di Sini</div>
+        </div>
+
+        <!-- Bottom Controls -->
+        <div class="bottom-bar">
+            <button id="btn-reload" class="btn-reload">🔄 KOKANG (RELOAD)</button>
+            <button id="btn-start-game" class="btn-start">▶️ MULAI GAME</button>
+        </div>
+    </div>
+
+    <!-- Controller Scripts -->
+    <script src="/ctrl_static/js/controller.js"></script>
+</body>
+</html>
