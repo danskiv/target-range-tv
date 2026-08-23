@@ -8,7 +8,7 @@ class GameEngine {
         this.canvas.width = this.width;
         this.canvas.height = this.height;
 
-        this.roomCode = 'TG' + Math.floor(Math.random() * 89 + 10);
+        this.roomCode = null; // resolved in initNetworking() — reuse latest room
         this.ws = null;
         this.state = 'LOBBY'; // LOBBY, COUNTDOWN, PLAYING, ROUND_OVER
 
@@ -28,6 +28,13 @@ class GameEngine {
         const info = await infoRes.json();
         const serverIp = info.server_ip;
 
+        // Reuse the latest existing room if any (prevents a new random room on
+        // every refresh); otherwise generate a fresh one.
+        const rooms = info.active_rooms || [];
+        this.roomCode = rooms.length > 0
+            ? rooms[rooms.length - 1]
+            : ('TG' + Math.floor(Math.random() * 89 + 10));
+
         // Setup QR code
         const port = info.default_port || window.location.port || 8095;
         const controllerUrl = `http://${serverIp}:${port}/controller?room=${this.roomCode}`;
@@ -46,7 +53,27 @@ class GameEngine {
     }
 
     handleSocketMessage(data) {
-        if (data.type === 'PLAYER_JOINED') {
+        if (data.type === 'ROOM_READY') {
+            // Populate players that joined BEFORE this TV display connected
+            // (e.g. REST-native controllers auto-registered server-side).
+            (data.players || []).forEach(p => {
+                if (!this.players[p.id]) {
+                    this.players[p.id] = {
+                        name: p.name,
+                        color: p.color,
+                        currentX: this.width / 2,
+                        currentY: this.height / 2,
+                        targetX: this.width / 2,
+                        targetY: this.height / 2,
+                        score: 0,
+                        combo: 1,
+                        streak: 0,
+                        ammo: 6
+                    };
+                }
+            });
+            this.updatePlayerLobbyUI();
+        } else if (data.type === 'PLAYER_JOINED') {
             this.players[data.player_id] = {
                 name: data.player_name,
                 color: data.color,
@@ -66,18 +93,25 @@ class GameEngine {
         } else if (data.type === 'AIM_UPDATE') {
             const p = this.players[data.player_id];
             if (p) {
-                // Map pitch & yaw to screen coords
-                // Yaw/Roll (X) -> Sensitivity 45px/deg
-                // Pitch (Y) -> Sensitivity 35px/deg
-                const sensX = 45;
-                const sensY = 35;
-                
-                const rawX = (this.width / 2) + (data.yaw * sensX);
-                const rawY = (this.height / 2) + (data.pitch * sensY);
+                if (data.x !== undefined && data.y !== undefined) {
+                    // REST-native controllers send normalized 0..1 screen coords
+                    // (computed with calibration on the phone) — use them directly.
+                    p.targetX = Math.max(20, Math.min(this.width - 20, data.x * this.width));
+                    p.targetY = Math.max(20, Math.min(this.height - 20, data.y * this.height));
+                } else {
+                    // WebSocket controllers send relative pitch/yaw deltas
+                    // Yaw/Roll (X) -> Sensitivity 45px/deg
+                    // Pitch (Y) -> Sensitivity 35px/deg
+                    const sensX = 45;
+                    const sensY = 35;
 
-                // Screen clamping
-                p.targetX = Math.max(20, Math.min(this.width - 20, rawX));
-                p.targetY = Math.max(20, Math.min(this.height - 20, rawY));
+                    const rawX = (this.width / 2) + (data.yaw * sensX);
+                    const rawY = (this.height / 2) + (data.pitch * sensY);
+
+                    // Screen clamping
+                    p.targetX = Math.max(20, Math.min(this.width - 20, rawX));
+                    p.targetY = Math.max(20, Math.min(this.height - 20, rawY));
+                }
             }
         } else if (data.type === 'TRIGGER_FIRE') {
             this.handlePlayerShot(data.player_id);

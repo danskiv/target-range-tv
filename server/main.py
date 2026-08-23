@@ -17,15 +17,28 @@ app.mount("/tv_static", StaticFiles(directory=str(BASE_DIR / "tv")), name="tv_st
 app.mount("/ctrl_static", StaticFiles(directory=str(BASE_DIR / "controller")), name="ctrl_static")
 
 def get_server_ip() -> str:
-    # Prefer VPN IP 10.10.10.1 if available
+    # Detect the LAN/WiFi IP that phones should connect to when the server
+    # runs locally (same home network as TV + phone).
+    candidates = []
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("10.10.10.5", 80))
-        ip = s.getsockname()[0]
+        s.connect(("8.8.8.8", 80))  # default-route interface
+        candidates.append(s.getsockname()[0])
         s.close()
-        return ip
     except Exception:
-        return "10.10.10.1"
+        pass
+    if not candidates:
+        try:
+            candidates.append(socket.gethostbyname(socket.gethostname()))
+        except Exception:
+            pass
+    ip = candidates[0] if candidates else "127.0.0.1"
+    # Prefer a home-LAN style address (192.168.x / 172.16-31.x) over 10.x
+    # so we do not advertise the WireGuard subnet when both exist.
+    for c in candidates:
+        if c.startswith("192.168.") or c.startswith("172."):
+            return c
+    return ip
 
 @app.get("/", response_class=HTMLResponse)
 async def index_redirect():
@@ -89,10 +102,23 @@ async def api_controller_aim(request: Request):
         data = await request.json()
         room_code = data.get("room_code", "TG88").upper()
         room = manager.get_room(room_code)
+        if room is None:
+            room = manager.create_room(room_code)  # REST path auto-creates like the WS path
+        player_id = data.get("player_id", "P1")
+        if player_id not in room.players:
+            # Auto-register REST-native players so the TV lobby/crosshair works
+            # (same effect as the WebSocket join path).
+            player = room.add_player(player_id, None, f"Pendekar {len(room.players) + 1}")
+            await room.broadcast_to_tv({
+                "type": "PLAYER_JOINED",
+                "player_id": player.player_id,
+                "player_name": player.name,
+                "color": player.color
+            })
         if room and room.tv_socket:
             await room.broadcast_to_tv({
                 "type": "AIM_UPDATE",
-                "player_id": data.get("player_id", "P1"),
+                "player_id": player_id,
                 "x": data.get("x", 0.5),
                 "y": data.get("y", 0.5),
                 "pitch": data.get("pitch", 0.0),
@@ -108,9 +134,11 @@ async def api_controller_action(request: Request):
     try:
         data = await request.json()
         room_code = data.get("room_code", "TG88").upper()
-        action_type = data.get("action") # "shoot", "reload", "start_game", "calibrate"
         room = manager.get_room(room_code)
-        if room and room.tv_socket:
+        if room is None:
+            room = manager.create_room(room_code)  # REST path auto-creates like the WS path
+        action_type = data.get("action") # "shoot", "reload", "start_game", "calibrate"
+        if room.tv_socket:
             if action_type == "shoot":
                 await room.broadcast_to_tv({"type": "TRIGGER_FIRE", "player_id": data.get("player_id", "P1")})
             elif action_type == "reload":

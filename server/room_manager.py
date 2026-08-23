@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Any
 from fastapi import WebSocket
 
 class Player:
-    def __init__(self, player_id: str, websocket: WebSocket, name: str = "Player", color: str = "#3B82F6"):
+    def __init__(self, player_id: str, websocket: Optional[WebSocket] = None, name: str = "Player", color: str = "#3B82F6"):
         self.player_id = player_id
         self.websocket = websocket
         self.name = name
@@ -27,7 +27,7 @@ class GameRoom:
         self.color_palette = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B"]  # Blue, Red, Green, Yellow
         self.created_at = time.time()
 
-    def add_player(self, player_id: str, ws: WebSocket, name: str) -> Player:
+    def add_player(self, player_id: str, ws: Optional[WebSocket], name: str) -> Player:
         color = self.color_palette[len(self.players) % len(self.color_palette)]
         player = Player(player_id, ws, name, color)
         self.players[player_id] = player
@@ -47,6 +47,8 @@ class GameRoom:
     async def broadcast_to_controllers(self, message: Dict[str, Any]):
         disconnected = []
         for pid, player in self.players.items():
+            if player.websocket is None:
+                continue  # REST-native players have no controller websocket
             try:
                 await player.websocket.send_json(message)
             except Exception:
@@ -55,7 +57,7 @@ class GameRoom:
             self.remove_player(pid)
 
     async def send_to_player(self, player_id: str, message: Dict[str, Any]):
-        if player_id in self.players:
+        if player_id in self.players and self.players[player_id].websocket is not None:
             try:
                 await self.players[player_id].websocket.send_json(message)
             except Exception:
