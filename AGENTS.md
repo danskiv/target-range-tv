@@ -1,36 +1,63 @@
-# AGENTS.md — Target Range TV (CyberShooter / RangeMaster)
+# AGENTS.md — Range Shooter (sebelumnya Target Range TV)
 
-Selamat datang, engineer/agent. Ini proyek **Target Range TV** — game latihan menembak multi-layar interaktif (Android TV sebagai display utama + HP Android sebagai air-mouse motion controller).
+Selamat datang, engineer/agent. Ini proyek **Range Shooter** — game menembak multi-layar bergenre **Neon Cyber Arena** (Android TV sebagai display + HP Android APK sebagai motion controller gyroscope). Proyek sedang dalam **v2.0.0-alpha**: membangun ulang dari v1 dengan renderer PixiJS/WebGL2.
 
 ## Aturan Dasar
 
-1. **PRD.md & docs/CONVENTIONS.md adalah sumber kebenaran tertinggi.** Baca kedua dokumen tersebut sebelum mengubah arsitektur atau kode.
-2. **Strict Zero-Install Controller.** Kontroller di HP berjalan 100% via mobile browser (HTML5 DeviceOrientation + WebSocket). Dilarang membuat dependensi yang mewajibkan instalasi APK di sisi pemain kecuali untuk wrapper Android TV wrapper jika dibutuhkan nanti.
-3. **Optimasi TV Rendah Daya.** Android TV memiliki RAM dan GPU terbatas. Hindari DOM bloat, heavy blur CSS, dan memory leak. Wajib gunakan *Object Pooling* pada rendering Canvas 2D.
-4. **Kalibrasi & Anti-Drift.** Semua implementasi sensor harus menyertakan mekanisme kalibrasi titik nol (*Re-Center*) yang mudah diakses pemain.
+1. **PRD-v2.md adalah sumber kebenaran tertinggi.** Baca `PRD-v2.md` (v2.0.0 APPROVED) dan `docs/CONVENTIONS.md` sebelum mengubah arsitektur/kode. Jangan pernah berasumsi — PRD bilang A, kode harus A.
+2. **Baca `AUDIT_LOG.md` SEBELUM menyentuh kode** — 12 pelajaran v1 yang TIDAK BOLEH diulang (slot TV tunggal, hardcode resolusi, executor APK, cache WebView, AP isolation, dst).
+3. **Input = APK native (ADR-003)**. Web controller telah DIGUGURKAN (sensor browser mati di HTTP LAN). Jangan menghidupkan kembali jalur web sensor.
+4. **Renderer v2 = PixiJS (ADR-004)**, tema Neon Cyber Arena, layout WAJIB responsif (`100vw/100vh`), dilarang hardcode resolusi.
+5. **Kalibrasi 5-titik affine + drift-damping (ADR-005)** — koordinat titik WAJIB sinkron TV ↔ APK (0.05/0.95).
+6. **Satu slot TV per room** (`room.tv_socket`) — jangan pernah connect klien TV kedua (observer hanya untuk uji, matikan sebelum main).
+7. **Cache-bust `?v=` + no-cache headers + badge versi** setiap asset statis berubah.
+8. **Konsistensi adalah hukum**: satu commit = satu perubahan logis + dokumen terkait sinkron (CHANGELOG/AUDIT_LOG/API/PRD).
 
 ## Panduan Navigasi Dokumen
 
 | # | Dokumen | Isi Utama | Kapan Dibaca |
 |---|---|---|---|
-| 1 | `PRD.md` | Visi produk, mekanik game, variasi sasaran, roadmap (v1.0.0) | **Wajib — pertama kali** |
-| 2 | `docs/CONVENTIONS.md` | Standar kode, SemVer, struktur direktori, prinsip rekayasa | **Wajib — kedua** |
-| 3 | `docs/01-architecture-spec.md` | Arsitektur topologi jaringan TV-Hub-Controller | Saat mendesain sistem |
-| 4 | `docs/02-sensor-gyro-math.md` | Kalkulasi sudut, LERP smoothing, deadzone, clamping | Saat mengutak-atik gyro |
-| 5 | `docs/03-websocket-protocol.md` | Format payload event real-time (Lobby, Gun, Score) | Saat integrasi networking |
-| 6 | `docs/04-bugs-and-pitfalls.md` | 8 Analisis kritis potensi bug hardware/sensor/network | Saat debugging & testing |
-| 7 | `docs/05-game-loop-and-states.md` | State machine permainan (Lobby, Playing, Game Over) | Saat mengelola alur game |
-| 8 | `docs/06-test-plan.md` | 20+ skenario uji fungsional, latensi, dan performa | Saat testing & QA |
-| 9 | `docs/adr/` | Rekaman keputusan arsitektur (ADR-001, ADR-002) | Saat butuh alasan arsitektur |
+| 1 | `PRD-v2.md` | **Sumber kebenaran v2** — mekanik, tema, arsitektur, keputusan final (APPROVED) | **Wajib — pertama kali** |
+| 2 | `docs/CONVENTIONS.md` | SemVer, struktur direktori, disiplin rekayasa | **Wajib — kedua** |
+| 3 | `AUDIT_LOG.md` | 12 temuan v1 + pelajaran abadi | **Wajib — sebelum ngoding** |
+| 4 | `ARCHITECTURE.md` | Ringkasan arsitektur + diagram alur data | Saat mendesain sistem |
+| 5 | `docs/03-websocket-protocol.md` | REST + WebSocket contracts | Saat integrasi networking |
+| 6 | `CODING_STANDARD.md` | Gaya kode Python/JS/Java | Sebelum menulis kode |
+| 7 | `TESTING.md` | Strategi unit/integrasi/manual | Saat testing & QA |
+| 8 | `CHANGELOG.md` | Riwayat versi | Sebelum bump versi |
+| 9 | `CONTRIBUTING.md` | Alur kontribusi & checklist | Sebelum commit/PR |
+| 10 | `docs/adr/` | ADR-001..005 (003/004/005 = v2) | Saat butuh alasan arsitektur |
+| 11 | `docs/01..06` | Spesifikasi detail v1 | Referensi teknis |
 
 ## Teknologi & Arsitektur
 
-- **Backend Hub**: FastAPI (Python 3.12) + Uvicorn + WebSockets
-- **TV Display**: HTML5 Canvas 2D + Vanilla JavaScript + Web Audio API (60 FPS low-overhead)
-- **Mobile Controller**: HTML5 `DeviceOrientationEvent` + `Vibration API` + Tailwind/Modern CSS
-- **Konektivitas**: Local Wi-Fi (LAN) / 5 GHz Network
+- **Backend Hub**: FastAPI (Python 3.11+) + Uvicorn + WebSockets, port `8095`, systemd (`target-range.service`)
+- **TV Display v2**: PixiJS (WebGL2, fallback Canvas 2D) + Vanilla JS + Web Audio API + Speech Synthesis (announcer English)
+- **Mobile Controller**: APK Android native (Java, SensorManager `TYPE_ROTATION_VECTOR`, WebSocket)
+- **Konektivitas**: Wi-Fi rumah (WLAN, ~3ms) — WireGuard hanya cadangan
+- **Struktur**: `server/`, `tv/` (v1), `tv-v2/` (v2), `android-controller-app/`, `android-tv-app/`
 
 ## Bahasa
 
-- **Kode & Dokumentasi Teknis**: English
-- **UI Display TV & Controller HP**: Bahasa Indonesia
+- **Kode, commit, dokumentasi teknis**: English
+- **UI TV & error user**: Bahasa Indonesia (v1) — v2 announcer **English** (keputusan final)
+- **Interaksi dengan user**: Bahasa Indonesia
+
+## Perintah Umum
+
+```bash
+# Server (dev)
+cd /home/ubuntu/Github/target-range-tv
+./venv/bin/python3 -m uvicorn server.main:app --host 0.0.0.0 --port 8095
+
+# Test server
+cd server && ../venv/bin/python -m pytest -q
+
+# Build APK
+cd android-controller-app && ./build.sh
+cd android-tv-app && ./build.sh
+
+# Deploy TV (ADB)
+adb -s 10.10.10.5:5555 install -r android-tv-app/bin/TargetRangeTV-v1.0.apk
+adb -s 10.10.10.5:5555 shell am start -n com.danskiv.targetrangetv/.MainActivity
+```
