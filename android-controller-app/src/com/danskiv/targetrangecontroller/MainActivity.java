@@ -41,7 +41,7 @@ import org.json.JSONObject;
 
 public class MainActivity extends Activity implements SensorEventListener {
     private static final String TAG = "TargetRangePureNative";
-    private static final String SERVER_HOST = "10.10.10.1";
+    private static final String SERVER_HOST = "10.225.156.153";
     private static final int SERVER_PORT = 8095;
 
     // Sensors

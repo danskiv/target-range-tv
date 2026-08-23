@@ -11,7 +11,7 @@ import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
     private WebView webView;
-    private static final String TV_URL = "http://10.10.10.1:8095/tv";
+    private static final String TV_URL = "http://10.225.156.153:8095/tv";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
