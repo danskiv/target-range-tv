@@ -2,6 +2,7 @@ package com.danskiv.targetrangecontroller;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -17,10 +18,13 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Toast;
 import android.util.Log;
 
 public class MainActivity extends Activity implements SensorEventListener {
     private static final String TAG = "TargetRangeController";
+    private static final int PERMISSION_REQ_CODE = 101;
+
     private WebView webView;
     private SensorManager sensorManager;
     private Sensor rotationSensor;
@@ -51,6 +55,44 @@ public class MainActivity extends Activity implements SensorEventListener {
             | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         );
 
+        // Runtime permissions check (Android 6.0+)
+        checkRuntimePermissions();
+
+        initSensors();
+        initWebView();
+    }
+
+    private void checkRuntimePermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            String[] permissions = {
+                "android.permission.INTERNET",
+                "android.permission.ACCESS_NETWORK_STATE",
+                "android.permission.VIBRATE"
+            };
+
+            boolean needRequest = false;
+            for (String perm : permissions) {
+                if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
+                    needRequest = true;
+                    break;
+                }
+            }
+
+            if (needRequest) {
+                requestPermissions(permissions, PERMISSION_REQ_CODE);
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PERMISSION_REQ_CODE) {
+            registerSensors();
+        }
+    }
+
+    private void initSensors() {
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         if (sensorManager != null) {
             rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
@@ -60,9 +102,10 @@ public class MainActivity extends Activity implements SensorEventListener {
             accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             magneticSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
         }
-
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+    }
 
+    private void initWebView() {
         webView = new WebView(this);
         setContentView(webView);
 
@@ -77,17 +120,13 @@ public class MainActivity extends Activity implements SensorEventListener {
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
 
-        // Hardware acceleration
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-
-        // Native JS Bridge
         webView.addJavascriptInterface(new NativeSensorBridge(), "AndroidNative");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                // Auto dismiss permission modal in native app
                 webView.evaluateJavascript("if(window.controllerApp){window.controllerApp.onNativeReady();}", null);
             }
         });
@@ -128,7 +167,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     @Override
     public void onSensorChanged(SensorEvent event) {
         long now = System.currentTimeMillis();
-        // Throttle to ~50 Hz (20ms)
+        // Throttle to 50 Hz (20ms)
         if (now - lastSensorUpdate < 20) return;
         lastSensorUpdate = now;
 
