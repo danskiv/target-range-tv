@@ -1,15 +1,15 @@
-# PRD — Range Shooter v2
+# PRD — Range Shooter
 **Product Requirements Document**
-*Version: v2.0.0-draft — Status: Draft / In Review*
+*Version: v2.0.0 — Status: APPROVED (keputusan final 2026-08-23)*
 *Repositori: danskiv/target-range-tv (branch `main`) — v2 dibangun di atas fondasi v1 yang sudah teruji*
 
 ---
 
 ## 1. Executive Summary & Vision
 
-**Range Shooter v2** adalah evolusi dari *Target Range TV*: game multi-layar *arcade shooting range* bergenre **Neon Cyber Arena** dengan fokus **engine & visual modern** (WebGL2 + partikel + audio) yang berjalan di **Android TV** dengan pengendali **HP Android native (APK)**.
+**Range Shooter** adalah evolusi dari *Target Range TV*: game multi-layar *arcade shooting range* bergenre **Neon Cyber Arena** dengan fokus **engine & visual modern** (WebGL2 + partikel + audio) yang berjalan di **Android TV** dengan pengendali **HP Android native (APK)**.
 
-- **Layar TV (Android TV / MiTV)**: Arena tembak futuristik neon, rendering **WebGL2 via PixiJS** (fallback Canvas 2D), partikel ledakan, *glow bloom*, target bergerak cerdas, HUD minimalis, dan announcer suara Bahasa Indonesia.
+- **Layar TV (Android TV / MiTV)**: Arena tembak futuristik neon, rendering **WebGL2 via PixiJS** (fallback Canvas 2D), partikel ledakan, *glow bloom*, target bergerak cerdas, HUD minimalis, dan announcer suara **English berkualitas**.
 - **Pengendali (HP Android)**: APK native memanfaatkan **SensorManager (rotation vector)** — terbukti empiris tanpa izin runtime, stabil di jaringan HTTP LAN (berbeda dengan web controller yang gagal karena *secure context*).
 - **Latensi**: Server lokal di laptop/TV via Wi-Fi rumah (WLAN), target <15 ms; topologi WLAN (bukan WireGuard) sudah terbukti 3 ms antar-perangkat.
 
@@ -43,7 +43,7 @@
 1. **TV nyala** → app WebView membuka `/v2` → server systemd siap → Room Code otomatis (mis. `RS42`).
 2. **Pairing**: HP (APK) deteksi server via `/api/info` → join room terbaru (satu room per sesi, bukan acak tiap refresh — warisan fix v1).
 3. **Kalibrasi 5 titik** (wajib saat pertama / opsional ulang kapan saja): TITIK 1/5 tengah → 4 pojok (0.05/0.95 normalized) → transformasi affine 6-parameter tersimpan per HP (`SharedPreferences "range_calib"`).
-4. **Countdown 3-2-1-FIRE** → ronde 60 detik (variabel).
+4. **Countdown 3-2-1-FIRE** → ronde **120 detik** (keputusan final).
 5. **Gameplay**: bidik via gerakan HP (rotation vector → affine → koordinat layar), tembak via tap layar HP (getar haptic), reload via tombol/gesture.
 6. **Ronde selesai** → ringkasan: skor, akurasi, combo tertinggi, gelar → tombol main lagi.
 
@@ -80,7 +80,7 @@
 | Lapisan | Teknologi | Isi |
 |---|---|---|
 | **SFX synth** | Web Audio API (oscillator + noise buffer) | Tembakan, hit, miss, reload, countdown, ronde selesai |
-| **Announcer** | Speech Synthesis API (Bahasa Indonesia) | "Tiga… dua… satu… TEMBAK!", "BULLSEYE!", "Combo x3!", "Waktu habis!" |
+| **Announcer** | Speech Synthesis API — **suara English berkualitas** (keputusan final; voice premium dipilih dari daftar TTS) | "Three… two… one… FIRE!", "BULLSEYE!", "Combo x3!", "Time's up!" |
 | **Haptic HP** | APK `VibrationEffect` | Recoil pendek saat tembak, denyut kuat saat hit |
 
 Aturan: audio **tidak boleh** memblokir frame render (dipisah thread/queue); master volume + mute toggle.
@@ -135,21 +135,23 @@ Aturan: audio **tidak boleh** memblokir frame render (dipisah thread/queue); mas
 | Versi | Isi | Kriteria Selesai |
 |---|---|---|
 | **v2.0.0-alpha** | Scaffold `/v2`: PixiJS renderer, Neon Cyber Arena, target dasar (node + drone), input APK WebSocket | Bisa main 1 ronde di TV, crosshair mengikuti, hit terdeteksi |
-| **v2.0.0-beta** | Partikel penuh, audio hybrid + announcer, kalibrasi drift-damping, kurva sensitivitas, HUD v2 | Main 60 detik stabil tanpa lag; kalibrasi ulang mulus |
-| **v2.0.0-gold** | Mode solo + leaderboard, haptic penuh, MessagePack (opsional), dokumentasi + deploy systemd | UAT di TV 720p & laptop; repo public, CI hijau |
+| **v2.0.0-beta** | Partikel penuh, audio hybrid + announcer English, kalibrasi drift-damping, kurva sensitivitas, HUD v2 | Main 120 detik stabil tanpa lag; kalibrasi ulang mulus |
+| **v2.0.0-gold** | Mode solo + leaderboard (LocalStorage TV), haptic penuh, dokumentasi + deploy systemd | UAT di TV 720p & laptop; repo public, CI hijau |
 | **v2.1.0** | Co-op wave, versus 1v1, multi-profile | Multiplayer 2+ pemain |
 
 ---
 
-## 10. Open Questions (belum diputuskan — tanyakan sebelum eksekusi)
+## 10. Keputusan Final (dikunci 2026-08-23)
 
-1. **Nama final game** — "Range Shooter v2" (working title) — dikunci?
-2. **Tema**: Neon Cyber Arena disetujui? (alternatif: Solar Dojo, Void Runner)
-3. **Durasi ronde default**: 60 detik (dari v1) atau 90?
-4. **Announcer suara**: TTS Android (`speechSynthesis`) atau suara synth custom? (TTS Bahasa Indonesia kualitas bervariasi)
-5. **MessagePack**: fase 2 — perlu? (JSON sudah cukup di LAN 3 ms; MP relevan jika multi-pemain 4+)
-6. **High score**: LocalStorage TV vs SQLite server?
+| # | Aspek | Keputusan |
+|---|---|---|
+| 1 | **Nama** | **Range Shooter** (dikunci) |
+| 2 | **Tema** | **Neon Cyber Arena** (cyan/magenta glow, grid perspektif) |
+| 3 | **Durasi ronde** | **120 detik** |
+| 4 | **Announcer** | **English berkualitas** (Speech Synthesis, voice premium — bukan Bahasa Indonesia) |
+| 5 | **MessagePack** | **Tunda ke fase 2** — JSON cukup di LAN 3ms; relevan hanya untuk 4+ pemain |
+| 6 | **High score** | **LocalStorage TV** (alpha) — SQLite server menyusul saat multiplayer |
 
 ---
 
-*Status: Draft — menunggu review & keputusan Yang Mulia sebelum eksekusi.*
+*Status: APPROVED — keputusan final terkunci. Eksekusi dapat dimulai.*
