@@ -118,6 +118,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         settings.setLoadWithOverviewMode(true);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
+        settings.setAllowFileAccessFromFileURLs(true);
+        settings.setAllowUniversalAccessFromFileURLs(true);
 
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.addJavascriptInterface(new NativeSensorBridge(), "AndroidNative");
@@ -128,20 +130,16 @@ public class MainActivity extends Activity implements SensorEventListener {
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
                 currentWebPermissionRequest = request;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    if (checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                request.grant(request.getResources());
-                            }
-                        });
-                    } else {
-                        requestPermissions(new String[]{android.Manifest.permission.CAMERA}, CAMERA_REQ_CODE);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            request.grant(request.getResources());
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error granting web permission: " + e.getMessage());
+                        }
                     }
-                } else {
-                    request.grant(request.getResources());
-                }
+                });
             }
 
             @Override

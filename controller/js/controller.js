@@ -76,13 +76,24 @@ class ControllerApp {
 
         try {
             btn.textContent = '⏳ Membuka Kamera...';
-            const constraints = {
-                video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
-            };
+            
+            // Try environment back camera first, fallback to user/any camera
+            let stream = null;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' } },
+                    audio: false
+                });
+            } catch (e1) {
+                console.warn('[Camera] Fallback to simple video constraint:', e1);
+                stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            }
 
-            this.videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+            this.videoStream = stream;
             video.srcObject = this.videoStream;
-            video.setAttribute('playsinline', true);
+            video.setAttribute('playsinline', 'true');
+            video.setAttribute('autoplay', 'true');
+            video.muted = true;
             await video.play();
 
             video.style.display = 'block';
@@ -93,8 +104,8 @@ class ControllerApp {
             requestAnimationFrame(() => this.scanQRCodeLoop());
         } catch (err) {
             console.error('[Camera Error]', err);
-            alert('Tidak dapat mengakses kamera. Pastikan izin kamera telah diberikan atau gunakan input manual Kode Room di bawah.');
             btn.textContent = '📸 BUKA KAMERA & SCAN QR TV';
+            alert(`Tidak dapat mengakses kamera (${err.name || 'Error'}). Silakan berikan izin Kamera di Pengaturan Aplikasi HP atau gunakan tombol GABUNG manual di bawah.`);
         }
     }
 
