@@ -145,6 +145,13 @@ async def api_controller_action(request: Request):
                 await room.broadcast_to_tv({"type": "RELOAD_ACTION", "player_id": data.get("player_id", "P1")})
             elif action_type == "start_game":
                 await room.broadcast_to_tv({"type": "START_GAME_REQ", "player_id": data.get("player_id", "P1")})
+            elif action_type == "calib_start":
+                await room.broadcast_to_tv({"type": "CALIB_START", "player_id": data.get("player_id", "P1")})
+            elif action_type == "calib_dot":
+                await room.broadcast_to_tv({"type": "CALIB_DOT", "player_id": data.get("player_id", "P1"),
+                                            "index": data.get("index", 0)})
+            elif action_type == "calib_done":
+                await room.broadcast_to_tv({"type": "CALIB_DONE", "player_id": data.get("player_id", "P1")})
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}

@@ -15,6 +15,16 @@ class GameEngine {
         // Players: { id: { name, color, currentX, currentY, targetX, targetY, score, combo, ammo } }
         this.players = {};
 
+        // 5-point calibration overlay (center + 4 corners, normalized 0..1)
+        this.calibPoints = [
+            { x: 0.50, y: 0.50 }, // 0 center
+            { x: 0.12, y: 0.12 }, // 1 top-left
+            { x: 0.88, y: 0.12 }, // 2 top-right
+            { x: 0.88, y: 0.88 }, // 3 bottom-right
+            { x: 0.12, y: 0.88 }  // 4 bottom-left
+        ];
+        this.calibDot = null; // {x, y, index, time} while calibrating
+
         this.timeLeft = 60;
         this.matchTimerInterval = null;
 
@@ -131,6 +141,13 @@ class GameEngine {
                 p.currentY = this.height / 2;
                 window.particlePool.addFloatingText('KALIBRASI OK', this.width / 2, this.height / 2, '#4ade80');
             }
+        } else if (data.type === 'CALIB_START') {
+            this.calibDot = Object.assign({ index: 0, time: performance.now() }, this.calibPoints[0]);
+        } else if (data.type === 'CALIB_DOT') {
+            const idx = Math.max(0, Math.min(data.index || 0, this.calibPoints.length - 1));
+            this.calibDot = Object.assign({ index: idx, time: performance.now() }, this.calibPoints[idx]);
+        } else if (data.type === 'CALIB_DONE') {
+            this.calibDot = null;
         } else if (data.type === 'START_GAME_REQ') {
             if (this.state === 'LOBBY') {
                 this.startCountdown();
@@ -341,6 +358,30 @@ class GameEngine {
         Object.values(this.players).forEach(p => {
             this.drawCrosshair(p);
         });
+
+        // Draw 5-point calibration overlay (pulsing dot the player must shoot)
+        if (this.calibDot) {
+            const t = (performance.now() - this.calibDot.time) / 600;
+            const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 2);
+            const cx = this.calibDot.x * this.width;
+            const cy = this.calibDot.y * this.height;
+            const r = 30 + pulse * 16;
+            this.ctx.save();
+            this.ctx.strokeStyle = '#facc15';
+            this.ctx.lineWidth = 5;
+            this.ctx.beginPath();
+            this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            this.ctx.stroke();
+            this.ctx.fillStyle = 'rgba(250, 204, 21, 0.22)';
+            this.ctx.beginPath();
+            this.ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.fillStyle = '#facc15';
+            this.ctx.font = 'bold 34px sans-serif';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText(`TITIK ${this.calibDot.index + 1}/5 — ARAHKAN & TEMBAK!`, cx, cy - r - 20);
+            this.ctx.restore();
+        }
     }
 
     drawBackground() {

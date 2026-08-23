@@ -2,6 +2,7 @@ package com.danskiv.targetrangecontroller;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.hardware.Sensor;
@@ -30,6 +31,9 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -68,6 +72,23 @@ public class MainActivity extends Activity implements SensorEventListener {
     private final int maxAmmo = 6;
     private boolean inGame = false;
 
+    // ---- 5-point affine calibration (center + 4 corners) ----
+    private static final float[][] CALIB_POINTS = {
+        {0.50f, 0.50f}, // 0 center
+        {0.12f, 0.12f}, // 1 top-left
+        {0.88f, 0.12f}, // 2 top-right
+        {0.88f, 0.88f}, // 3 bottom-right
+        {0.12f, 0.88f}  // 4 bottom-left
+    };
+    private boolean calibActive = false;
+    private int calibIndex = 0;
+    private final List<float[]> calibSamples = new ArrayList<>();
+    private volatile boolean calibReady = false;
+    private volatile float calibA0, calibA1, calibA2, calibA3; // x = a0 + a1*yaw + a2*pitch + a3*roll
+    private volatile float calibB0, calibB1, calibB2, calibB3; // y = b0 + b1*yaw + b2*pitch + b3*roll
+    private SharedPreferences prefs;
+    private Button btnCalib;
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -97,6 +118,7 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         initSensors();
         buildNativeUI();
+        loadCalibration();
         autoDiscoverRoom();
     }
 
@@ -252,23 +274,23 @@ public class MainActivity extends Activity implements SensorEventListener {
         header.addView(ammoContainer);
         controllerView.addView(header);
 
-        // Calibration Button
-        Button btnRecenter = new Button(this);
-        btnRecenter.setText("🎯 ARAHKAN KE TENGAH TV & KALIBRASI");
-        btnRecenter.setTextColor(Color.BLACK);
-        btnRecenter.setBackgroundColor(Color.parseColor("#eab308"));
-        btnRecenter.setTextSize(12);
-        btnRecenter.setTypeface(null, Typeface.BOLD);
+        // Calibration Button (5-point affine calibration)
+        btnCalib = new Button(this);
+        btnCalib.setText("🎯 ARAHKAN KE TENGAH TV & KALIBRASI");
+        btnCalib.setTextColor(Color.BLACK);
+        btnCalib.setBackgroundColor(Color.parseColor("#eab308"));
+        btnCalib.setTextSize(12);
+        btnCalib.setTypeface(null, Typeface.BOLD);
         LinearLayout.LayoutParams calLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         calLp.setMargins(0, 15, 0, 15);
-        btnRecenter.setLayoutParams(calLp);
-        btnRecenter.setOnClickListener(new View.OnClickListener() {
+        btnCalib.setLayoutParams(calLp);
+        btnCalib.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                calibrateZero();
+                startCalibration();
             }
         });
-        controllerView.addView(btnRecenter);
+        controllerView.addView(btnCalib);
 
         // Big Trigger Touch Pad
         btnTrigger = new Button(this);
@@ -381,17 +403,185 @@ public class MainActivity extends Activity implements SensorEventListener {
         doVibrate(50);
     }
 
+    // ==================== 5-POINT AFFINE CALIBRATION ====================
+
+    private void loadCalibration() {
+        try {
+            prefs = getSharedPreferences("range_calib", MODE_PRIVATE);
+            if (prefs.getBoolean("ready", false)) {
+                calibA0 = prefs.getFloat("a0", 0); calibA1 = prefs.getFloat("a1", 0);
+                calibA2 = prefs.getFloat("a2", 0); calibA3 = prefs.getFloat("a3", 0);
+                calibB0 = prefs.getFloat("b0", 0); calibB1 = prefs.getFloat("b1", 0);
+                calibB2 = prefs.getFloat("b2", 0); calibB3 = prefs.getFloat("b3", 0);
+                calibReady = true;
+                if (btnCalib != null) {
+                    btnCalib.setText("✅ KALIBRASI TERSIMPAN (Tekan untuk ulang)");
+                    btnCalib.setBackgroundColor(Color.parseColor("#22c55e"));
+                }
+            }
+        } catch (Exception e) {}
+    }
+
+    private void startCalibration() {
+        calibActive = true;
+        calibIndex = 0;
+        calibSamples.clear();
+        doVibrate(50);
+        updateCalibUI();
+        sendHttpAction("calib_start");
+        sendCalibDot(0);
+    }
+
+    private void updateCalibUI() {
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (btnCalib != null) {
+                    btnCalib.setText(String.format(Locale.US,
+                        "🎯 TITIK %d/5: ARAHKAN KE TITIK KUNING & TEMBAK! (%s)",
+                        calibIndex + 1, calibPointName(calibIndex)));
+                    btnCalib.setBackgroundColor(Color.parseColor("#eab308"));
+                }
+            }
+        });
+    }
+
+    private String calibPointName(int i) {
+        switch (i) {
+            case 0: return "TENGAH";
+            case 1: return "KIRI-ATAS";
+            case 2: return "KANAN-ATAS";
+            case 3: return "KANAN-BAWAH";
+            default: return "KIRI-BAWAH";
+        }
+    }
+
+    private void recordCalibSample() {
+        float[] pt = CALIB_POINTS[calibIndex];
+        calibSamples.add(new float[]{ currentYaw, currentPitch, currentRoll, pt[0], pt[1] });
+        calibIndex++;
+        if (calibIndex < CALIB_POINTS.length) {
+            doVibrate(60);
+            updateCalibUI();
+            sendCalibDot(calibIndex);
+        } else {
+            computeAffine();
+            calibActive = false;
+            calibReady = true;
+            saveCalibration();
+            doVibrate(150);
+            mainHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (btnCalib != null) {
+                        btnCalib.setText("✅ KALIBRASI SELESAI! (Tekan untuk ulang)");
+                        btnCalib.setBackgroundColor(Color.parseColor("#22c55e"));
+                    }
+                }
+            });
+            sendHttpAction("calib_done");
+        }
+    }
+
+    private void computeAffine() {
+        int n = calibSamples.size();
+        if (n < 4) return;
+        double[][] N = new double[4][4];
+        double[] rx = new double[4], ry = new double[4];
+        for (float[] s : calibSamples) {
+            double yaw = s[0], pitch = s[1], roll = s[2], sx = s[3], sy = s[4];
+            double[] row = {1, yaw, pitch, roll};
+            for (int i = 0; i < 4; i++) {
+                for (int j = 0; j < 4; j++) N[i][j] += row[i] * row[j];
+                rx[i] += row[i] * sx;
+                ry[i] += row[i] * sy;
+            }
+        }
+        double[] ax = solve4(N, rx);
+        double[] ay = solve4(N, ry);
+        calibA0 = (float) ax[0]; calibA1 = (float) ax[1]; calibA2 = (float) ax[2]; calibA3 = (float) ax[3];
+        calibB0 = (float) ay[0]; calibB1 = (float) ay[1]; calibB2 = (float) ay[2]; calibB3 = (float) ay[3];
+    }
+
+    private double[] solve4(double[][] A, double[] b) {
+        double[][] M = new double[4][5];
+        for (int i = 0; i < 4; i++) {
+            System.arraycopy(A[i], 0, M[i], 0, 4);
+            M[i][4] = b[i];
+        }
+        for (int col = 0; col < 4; col++) {
+            int piv = col;
+            for (int r = col + 1; r < 4; r++) {
+                if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+            }
+            double[] tmp = M[col]; M[col] = M[piv]; M[piv] = tmp;
+            for (int r = 0; r < 4; r++) {
+                if (r == col) continue;
+                double f = M[r][col] / M[col][col];
+                for (int c = col; c < 5; c++) M[r][c] -= f * M[col][c];
+            }
+        }
+        double[] x = new double[4];
+        for (int i = 0; i < 4; i++) x[i] = M[i][4] / M[i][i];
+        return x;
+    }
+
+    private void saveCalibration() {
+        try {
+            if (prefs == null) prefs = getSharedPreferences("range_calib", MODE_PRIVATE);
+            SharedPreferences.Editor ed = prefs.edit();
+            ed.putBoolean("ready", true);
+            ed.putFloat("a0", calibA0); ed.putFloat("a1", calibA1); ed.putFloat("a2", calibA2); ed.putFloat("a3", calibA3);
+            ed.putFloat("b0", calibB0); ed.putFloat("b1", calibB1); ed.putFloat("b2", calibB2); ed.putFloat("b3", calibB3);
+            ed.apply();
+        } catch (Exception e) {}
+    }
+
+    private void sendCalibDot(final int index) {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    JSONObject payload = new JSONObject();
+                    payload.put("room_code", currentRoom);
+                    payload.put("player_id", playerId);
+                    payload.put("action", "calib_dot");
+                    payload.put("index", index);
+                    URL url = new URL("http://" + SERVER_HOST + ":" + SERVER_PORT + "/api/controller/action");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setConnectTimeout(500);
+                    conn.setReadTimeout(500);
+                    conn.setDoOutput(true);
+                    OutputStream os = conn.getOutputStream();
+                    os.write(payload.toString().getBytes("UTF-8"));
+                    os.close();
+                    conn.getResponseCode();
+                    conn.disconnect();
+                } catch (Exception e) {}
+            }
+        });
+    }
+
     private void startNativeAimLoop() {
         executor.execute(new Runnable() {
             @Override
             public void run() {
                 while (inGame) {
                     try {
-                        float deltaPitch = currentPitch - originPitch;
-                        float deltaRoll = currentRoll - originRoll;
-
-                        float normX = 0.5f - (deltaRoll / 50.0f);
-                        float normY = 0.5f - (deltaPitch / 40.0f);
+                        float normX, normY;
+                        if (calibReady) {
+                            // Affine transform from 5-point calibration:
+                            // maps absolute sensor orientation -> normalized screen coords.
+                            normX = calibA0 + calibA1 * currentYaw + calibA2 * currentPitch + calibA3 * currentRoll;
+                            normY = calibB0 + calibB1 * currentYaw + calibB2 * currentPitch + calibB3 * currentRoll;
+                        } else {
+                            float deltaPitch = currentPitch - originPitch;
+                            float deltaRoll = currentRoll - originRoll;
+                            normX = 0.5f - (deltaRoll / 50.0f);
+                            normY = 0.5f - (deltaPitch / 40.0f);
+                        }
                         normX = Math.max(0.0f, Math.min(1.0f, normX));
                         normY = Math.max(0.0f, Math.min(1.0f, normY));
 
@@ -427,6 +617,10 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     private void fireTrigger() {
+        if (calibActive) {
+            recordCalibSample();  // shooting during calibration = record sample
+            return;
+        }
         if (ammo <= 0) {
             doVibrate(150);
             return;
