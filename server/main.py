@@ -16,6 +16,17 @@ app = FastAPI(title="Target Range TV Hub", version="1.0.0")
 app.mount("/tv_static", StaticFiles(directory=str(BASE_DIR / "tv")), name="tv_static")
 app.mount("/ctrl_static", StaticFiles(directory=str(BASE_DIR / "controller")), name="ctrl_static")
 
+@app.middleware("http")
+async def no_cache_middleware(request, call_next):
+    """Never let the browser cache pages/JS — stale UI files caused endless
+    'still old version' confusion (badge stayed v1.3.0 while server was newer)."""
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/tv_static") or path.startswith("/ctrl_static") or path in ("/", "/tv", "/controller"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
 def get_server_ip() -> str:
     # Detect the LAN/WiFi IP that phones should connect to when the server
     # runs locally (same home network as TV + phone).
