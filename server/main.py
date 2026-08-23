@@ -59,12 +59,13 @@ async def index_redirect():
 @app.get("/tv", response_class=HTMLResponse)
 async def tv_page():
     html_file = BASE_DIR / "tv" / "index.html"
-    return HTMLResponse(content=html_file.read_text())
+    # Explicit UTF-8: Windows Python defaults to cp1252 which garbles emoji (ðŸŽ¯)
+    return HTMLResponse(content=html_file.read_text(encoding="utf-8"))
 
 @app.get("/controller", response_class=HTMLResponse)
 async def controller_page(room: str = ""):
     html_file = BASE_DIR / "controller" / "index.html"
-    return HTMLResponse(content=html_file.read_text())
+    return HTMLResponse(content=html_file.read_text(encoding="utf-8"))
 
 @app.get("/api/qr")
 async def generate_qr(url: str):
